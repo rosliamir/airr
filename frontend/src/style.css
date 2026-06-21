@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+/* AIRR brand: crimson gradient #FB7185 -> #E11D48 -> #9F1239 */
+@theme {
+  --color-airr-50: #fff1f2;
+  --color-airr-300: #fb7185;
+  --color-airr-500: #e11d48;
+  --color-airr-700: #9f1239;
+}
+
+body {
+  @apply bg-slate-50 text-slate-800 antialiased;
+}
