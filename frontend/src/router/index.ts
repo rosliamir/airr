@@ -2,14 +2,23 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { adminMenu } from '../config/admin-menu'
 import LoginView from '../views/LoginView.vue'
+import RegisterView from '../views/RegisterView.vue'
+import ForgotPasswordView from '../views/ForgotPasswordView.vue'
+import ResetPasswordView from '../views/ResetPasswordView.vue'
 import DashboardView from '../views/DashboardView.vue'
 import AuditView from '../views/AuditView.vue'
+import UsersView from '../views/UsersView.vue'
+import ProjectsView from '../views/ProjectsView.vue'
+import SettingsView from '../views/SettingsView.vue'
 import ComingSoonView from '../views/ComingSoonView.vue'
 
 // Real views for the modules that are already built.
 const readyViews: Record<string, () => unknown> = {
   dashboard: () => DashboardView,
   audit: () => AuditView,
+  users: () => UsersView,
+  projects: () => ProjectsView,
+  settings: () => SettingsView,
 }
 
 // Build protected routes from the menu config so the two never drift.
@@ -34,6 +43,9 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: '/dashboard' },
     { path: '/login', name: 'login', component: LoginView, meta: { guestOnly: true, title: 'Sign in' } },
+    { path: '/register', name: 'register', component: RegisterView, meta: { guestOnly: true, title: 'Register' } },
+    { path: '/forgot-password', name: 'forgot-password', component: ForgotPasswordView, meta: { guestOnly: true, title: 'Forgot password' } },
+    { path: '/reset-password', name: 'reset-password', component: ResetPasswordView, meta: { guestOnly: true, title: 'Reset password' } },
     ...menuRoutes,
   ],
 })

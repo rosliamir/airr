@@ -50,9 +50,10 @@ export const adminMenu: MenuGroup[] = [
   {
     title: 'Governance',
     items: [
-      { label: 'Users & Roles', route: 'users', icon: 'Users', module: 'M14', permission: 'users.manage', feature: 'rbac_full', phase: 0, ready: false },
+      { label: 'Projects', route: 'projects', icon: 'FolderKanban', module: 'M14', permission: 'projects.view', phase: 0, ready: true },
+      { label: 'Users & Roles', route: 'users', icon: 'Users', module: 'M14', permission: 'users.manage', feature: 'rbac_full', phase: 0, ready: true },
       { label: 'Audit Log', route: 'audit', icon: 'ScrollText', module: 'M1', permission: 'audit.read', phase: 0, ready: true },
-      { label: 'Settings', route: 'settings', icon: 'Settings', module: 'M14', permission: 'settings.manage', phase: 0, ready: false },
+      { label: 'Settings', route: 'settings', icon: 'Settings', module: 'M14', permission: 'settings.manage', phase: 0, ready: true },
     ],
   },
 ]
