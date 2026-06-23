@@ -22,6 +22,22 @@ export function setToken(t: string | null) {
   else localStorage.removeItem('airr_token')
 }
 
+// Multipart upload (FormData) — never set Content-Type manually so the browser
+// adds the multipart boundary. Shares auth + error handling with apiRequest.
+export async function uploadFile<T>(path: string, form: FormData): Promise<T> {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  const t = token()
+  if (t) headers.Authorization = `Bearer ${t}`
+
+  const res = await fetch(`${API_BASE_URL}/api${path}`, { method: 'POST', body: form, headers })
+  const json = await res.json().catch(() => null)
+  if (!res.ok) {
+    const error: ApiError = json?.error ?? { code: 'UNKNOWN', message: res.statusText }
+    throw new ApiException(res.status, error)
+  }
+  return json as T
+}
+
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     Accept: 'application/json',

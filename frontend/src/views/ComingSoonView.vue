@@ -16,10 +16,10 @@ const phase = (route.meta.phase as number) ?? ''
       </div>
       <h2 class="text-xl font-semibold">{{ route.meta.title }}</h2>
       <p class="mt-2 text-slate-500">
-        Modul <span class="font-mono font-medium">{{ module }}</span> — akan dibina dalam
+        Module <span class="font-mono font-medium">{{ module }}</span> — coming in
         <span class="font-medium text-airr-600">Phase {{ phase }}</span>.
       </p>
-      <p class="mt-1 text-sm text-slate-400">Skrin ini placeholder sementara menunggu pelaksanaan.</p>
+      <p class="mt-1 text-sm text-slate-400">This screen is a placeholder pending implementation.</p>
     </div>
   </AdminLayout>
 </template>

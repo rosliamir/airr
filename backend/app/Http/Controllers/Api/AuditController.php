@@ -16,13 +16,18 @@ class AuditController extends Controller
     public function index(Request $request): JsonResponse
     {
         $page  = (int) $request->input('page', 1);
-        $limit = (int) $request->input('limit', 20);
-        $q     = $request->input('q');
+        $limit = (int) $request->input('limit', 10);
+        $q     = trim((string) $request->input('q'));
 
         $query = AuditLog::query()->with('user:id,name,email');
 
-        if ($q) {
-            $query->where('action', 'like', "%{$q}%");
+        // Search across action, object type and the actor's name/email.
+        if ($q !== '') {
+            $query->where(function ($w) use ($q) {
+                $w->where('action', 'like', "%{$q}%")
+                    ->orWhere('object_type', 'like', "%{$q}%")
+                    ->orWhereHas('user', fn ($u) => $u->where('name', 'like', "%{$q}%")->orWhere('email', 'like', "%{$q}%"));
+            });
         }
 
         $total = $query->count();

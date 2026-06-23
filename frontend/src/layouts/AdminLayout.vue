@@ -5,6 +5,7 @@ import * as icons from 'lucide-vue-next'
 import { adminMenu, type MenuItem } from '../config/admin-menu'
 import { useAuthStore } from '../stores/auth'
 import AirrLogo from '../components/AirrLogo.vue'
+import UserAvatar from '../components/UserAvatar.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -66,9 +67,7 @@ async function logout() {
 
       <div class="p-3 border-t border-slate-100">
         <div class="flex items-center gap-2 px-2 py-1.5">
-          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-airr-300 to-airr-700 text-white flex items-center justify-center text-xs font-bold">
-            {{ auth.user?.name?.charAt(0) ?? '?' }}
-          </div>
+          <UserAvatar :name="auth.user?.name ?? '?'" :src="auth.user?.avatar_url" :size="32" />
           <div class="flex-1 min-w-0">
             <div class="text-sm font-medium truncate">{{ auth.user?.name }}</div>
             <div class="text-[11px] text-slate-400 truncate">{{ auth.user?.roles.join(', ') }}</div>

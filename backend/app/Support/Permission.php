@@ -33,6 +33,8 @@ class Permission
     const ROLES_MANAGE = 'roles.manage';
     const AUDIT_READ   = 'audit.read';
     const SETTINGS_MANAGE = 'settings.manage';
+    const PROJECTS_VIEW   = 'projects.view';
+    const PROJECTS_MANAGE = 'projects.manage';
 
     public static function all(): array
     {
@@ -43,6 +45,7 @@ class Permission
             self::KB_VIEW, self::KB_MANAGE,
             self::APIKEYS_MANAGE,
             self::USERS_MANAGE, self::ROLES_MANAGE, self::AUDIT_READ, self::SETTINGS_MANAGE,
+            self::PROJECTS_VIEW, self::PROJECTS_MANAGE,
         ];
     }
 }
