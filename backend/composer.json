@@ -12,6 +12,7 @@
         "laravel/socialite": "^5.28",
         "laravel/tinker": "^3.0",
         "phpoffice/phpspreadsheet": "^5.8",
+        "smalot/pdfparser": "^2.12",
         "yajra/laravel-oci8": "^13.7"
     },
     "require-dev": {
