@@ -39,7 +39,7 @@ class FileParser
         $columns = [];
         $rows = [];
         $i = 0;
-        while (($line = fgetcsv($handle, 0, $delimiter)) !== false) {
+        while (($line = fgetcsv($handle, 0, $delimiter, '"', '')) !== false) {
             if ($i === 0) {
                 $columns = $hasHeader
                     ? array_map(fn ($c) => trim((string) $c), $line)
