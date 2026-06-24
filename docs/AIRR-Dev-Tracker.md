@@ -40,8 +40,8 @@
 | [x] | FR-M14.x | **Projects** — CRUD + assign users/groups + scoping (reports stored by project) | ✅ | 2026-06-22 | 17:28 |
 | [x] | FR-M1.5+ | Audit log — searchable + paginated 10/page + expandable detail | ✅ | 2026-06-22 | 17:28 |
 | [x] | FR-M14.4b | **Settings** — Regional (editable), Subscription (limits/features), About | ✅ | 2026-06-22 | 19:10 |
-| [ ] | FR-M14.5 | **Per-project AI config** — setiap projek pilih provider+model **per-task** (embedding/generation/reasoning/audit); kosong = warisi system default. Simpan `projects.ai_config` (JSONB). Gated: Community=default sahaja, Standard=pilih model dipasang, Enterprise=dedicated/tuned | ⬜ | | |
-| [ ] | FR-M14.6 | **Settings → AI/Models tab** — admin set system-default + uji health model (UI; boleh tangguh selepas resolver siap) | ⬜ | | |
+| [x] | FR-M14.5 | **Per-project AI config** — projek pilih model **per-task** (UI dalam Project form, gated `project_ai_config`); kosong = warisi default. `projects.ai_config` JSONB + validasi controller | ✅ | 2026-06-24 | |
+| [x] | FR-M14.6 | **Settings → AI/Models tab** — admin set system-default (Setting `ai`) + health-check provider + senarai model | ✅ | 2026-06-24 | |
 | [ ] | — | Commit kerja auth + seeder ke git | ⬜ | | |
 
 ---

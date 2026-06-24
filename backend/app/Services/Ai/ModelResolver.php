@@ -3,6 +3,7 @@
 namespace App\Services\Ai;
 
 use App\Models\Project;
+use App\Models\Setting;
 use App\Support\Edition;
 use Illuminate\Support\Facades\Config;
 use InvalidArgumentException;
@@ -28,8 +29,9 @@ class ModelResolver
     {
         $this->assertTask($task);
 
-        $provider = (string) Config::get('ai.provider', 'ollama');
-        $model = (string) Config::get("ai.defaults.{$task}");
+        $defaults = $this->systemDefaults();
+        $provider = $defaults['provider'];
+        $model = (string) ($defaults['models'][$task] ?? '');
 
         $override = $this->projectConfig($project);
         if ($override) {
@@ -44,6 +46,25 @@ class ModelResolver
     public function model(string $task, ?Project $project = null): string
     {
         return $this->resolve($task, $project)['model'];
+    }
+
+    /**
+     * Effective system defaults: admin-editable Setting('ai') layered over the
+     * static config/ai.php baseline (FR-M15.6 / FR-M14.6).
+     *
+     * @return array{provider:string, models:array<string,string>}
+     */
+    public function systemDefaults(): array
+    {
+        $stored = Setting::get('ai', []);
+
+        return [
+            'provider' => $stored['provider'] ?? (string) Config::get('ai.provider', 'ollama'),
+            'models'   => array_merge(
+                (array) Config::get('ai.defaults', []),
+                array_filter((array) ($stored['models'] ?? []), fn ($v) => $v !== null && $v !== ''),
+            ),
+        ];
     }
 
     /**

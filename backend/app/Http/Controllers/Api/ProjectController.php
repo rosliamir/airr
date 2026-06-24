@@ -83,6 +83,14 @@ class ProjectController extends Controller
             'start_date'    => 'nullable|date',
             'end_date'      => 'nullable|date|after_or_equal:start_date',
             'description'   => 'nullable|string|max:2000',
+            // FR-M14.5 per-project AI override (edition-gated at resolution time).
+            'ai_config'                   => 'nullable|array',
+            'ai_config.provider'          => 'nullable|string|max:40',
+            'ai_config.models'            => 'nullable|array',
+            'ai_config.models.embedding'  => 'nullable|string|max:120',
+            'ai_config.models.generation' => 'nullable|string|max:120',
+            'ai_config.models.reasoning'  => 'nullable|string|max:120',
+            'ai_config.models.audit'      => 'nullable|string|max:120',
         ]);
     }
 
@@ -115,6 +123,7 @@ class ProjectController extends Controller
             'start_date'  => $p->start_date?->toDateString(),
             'end_date'    => $p->end_date?->toDateString(),
             'description' => $p->description,
+            'ai_config'   => $p->ai_config,
             'creator'     => $p->creator ? ['id' => $p->creator->id, 'name' => $p->creator->name] : null,
             'users_count' => $p->users_count ?? $p->users()->count(),
             'groups_count' => $p->groups_count ?? $p->groups()->count(),

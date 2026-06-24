@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AiController;
 use App\Http\Controllers\Api\AuditController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DatasetController;
@@ -67,6 +68,13 @@ Route::middleware('auth:sanctum')->group(function () {
     // M14 — global settings
     Route::get('settings', [SettingsController::class, 'index'])->middleware('permission:settings.manage');
     Route::put('settings/regional', [SettingsController::class, 'updateRegional'])->middleware('permission:settings.manage');
+
+    // M14.6 / M15.6-7 — AI provider & model administration
+    Route::middleware('permission:settings.manage')->group(function () {
+        Route::get('ai/config', [AiController::class, 'index']);
+        Route::put('ai/config', [AiController::class, 'updateDefaults']);
+        Route::get('ai/health', [AiController::class, 'health']);
+    });
 
     // M2 — Data Sources (connections) + Datasets (queries/params)
     Route::middleware('permission:datasources.view')->group(function () {

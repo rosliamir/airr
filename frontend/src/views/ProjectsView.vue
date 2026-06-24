@@ -16,6 +16,7 @@ type Project = {
   start_date: string | null
   end_date: string | null
   description: string | null
+  ai_config: { provider?: string; models?: Record<string, string> } | null
   creator: { id: number; name: string } | null
   users_count: number
   groups_count: number
@@ -64,7 +65,15 @@ const form = ref({
   code: '', name: '', customer_name: '', type: '', color: '', status: 'active',
   start_date: '', end_date: '', description: '',
   users: [] as number[], groups: [] as number[],
+  ai_models: {} as Record<string, string>,
 })
+
+// AI defaults + per-project gate (FR-M14.5). Loaded once; inputs show defaults
+// as placeholders and only persist values that differ.
+const aiCfg = ref<{ provider: string; tasks: string[]; defaults: { models: Record<string, string> }; per_project: boolean } | null>(null)
+const AI_TASK_LABELS: Record<string, string> = {
+  embedding: 'Embedding', generation: 'Generation', reasoning: 'Reasoning', audit: 'Audit',
+}
 
 // Member/group pick search.
 const userSearch = ref('')
@@ -108,7 +117,7 @@ function resetSearch() {
 async function openCreate() {
   editing.value = null
   resetSearch()
-  form.value = { code: '', name: '', customer_name: '', type: '', color: '', status: 'active', start_date: '', end_date: '', description: '', users: [], groups: [] }
+  form.value = { code: '', name: '', customer_name: '', type: '', color: '', status: 'active', start_date: '', end_date: '', description: '', users: [], groups: [], ai_models: {} }
   showForm.value = true
 }
 async function openEdit(p: Project) {
@@ -123,6 +132,7 @@ async function openEdit(p: Project) {
     start_date: d.start_date ?? '', end_date: d.end_date ?? '', description: d.description ?? '',
     users: (d.users ?? []).map((m) => m.id),
     groups: (d.groups ?? []).map((m) => m.id),
+    ai_models: { ...(d.ai_config?.models ?? {}) },
   }
   showForm.value = true
 }
@@ -135,7 +145,13 @@ async function save() {
   busy.value = true
   error.value = ''
   try {
-    const body = { ...form.value }
+    const { ai_models, ...rest } = form.value
+    // Persist only non-empty per-task overrides; otherwise inherit system default.
+    const models = Object.fromEntries(Object.entries(ai_models).filter(([, v]) => v && v.trim()))
+    const body = {
+      ...rest,
+      ai_config: Object.keys(models).length ? { provider: aiCfg.value?.provider, models } : null,
+    }
     const path = editing.value ? `/projects/${editing.value.id}` : '/projects'
     await apiRequest(path, { method: editing.value ? 'PUT' : 'POST', body: JSON.stringify(body) })
     showForm.value = false
@@ -160,7 +176,17 @@ async function remove(p: Project) {
   }
 }
 
-onMounted(load)
+async function loadAiCfg() {
+  if (!auth.can('settings.manage')) return
+  try {
+    aiCfg.value = (await apiRequest<{ data: typeof aiCfg.value }>('/ai/config')).data
+  } catch { /* non-fatal: AI override section simply hidden */ }
+}
+
+onMounted(() => {
+  load()
+  loadAiCfg()
+})
 </script>
 
 <template>
@@ -260,6 +286,21 @@ onMounted(load)
         <div>
           <label class="block text-sm font-medium text-slate-600 mb-1">Description</label>
           <textarea v-model="form.description" rows="2" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none"></textarea>
+        </div>
+
+        <!-- Per-project AI override (FR-M14.5) — Standard/Enterprise only -->
+        <div v-if="aiCfg?.per_project" class="rounded-lg border border-slate-200 p-4 space-y-3">
+          <div>
+            <div class="text-sm font-medium text-slate-600">AI models <span class="text-slate-400 font-normal">· override (optional)</span></div>
+            <p class="text-xs text-slate-400">Leave blank to inherit the system default. On-premise via {{ aiCfg.provider }}.</p>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div v-for="t in aiCfg.tasks" :key="t">
+              <label class="block text-xs font-medium text-slate-500 mb-1">{{ AI_TASK_LABELS[t] ?? t }}</label>
+              <input v-model="form.ai_models[t]" :placeholder="aiCfg.defaults.models[t] ?? 'default'"
+                class="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
+            </div>
+          </div>
         </div>
 
         <div class="grid grid-cols-2 gap-4">

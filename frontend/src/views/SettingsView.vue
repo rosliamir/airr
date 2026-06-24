@@ -13,7 +13,16 @@ type Settings = {
   }
 }
 
-const tab = ref<'regional' | 'subscription' | 'about'>('regional')
+type AiConfig = {
+  provider: string
+  tasks: string[]
+  defaults: { provider: string; models: Record<string, string> }
+  per_project: boolean
+  edition: string
+}
+type AiHealth = { provider: string; reachable: boolean; models: { name: string }[] }
+
+const tab = ref<'regional' | 'ai' | 'subscription' | 'about'>('regional')
 const data = ref<Settings | null>(null)
 const loading = ref(true)
 const saving = ref(false)
@@ -21,6 +30,19 @@ const error = ref('')
 const saved = ref(false)
 
 const form = ref<Record<string, string>>({})
+
+// AI / Models tab state
+const ai = ref<AiConfig | null>(null)
+const aiModels = ref<Record<string, string>>({})
+const aiHealth = ref<AiHealth | null>(null)
+const checkingHealth = ref(false)
+
+const TASK_LABELS: Record<string, string> = {
+  embedding: 'Embedding (RAG vectors)',
+  generation: 'Generation (writing)',
+  reasoning: 'Reasoning (analysis)',
+  audit: 'Audit (double-check)',
+}
 
 const REGIONAL_FIELDS = [
   { key: 'region', label: 'Region' },
@@ -71,21 +93,63 @@ async function saveRegional() {
   }
 }
 
+async function loadAi() {
+  try {
+    ai.value = (await apiRequest<{ data: AiConfig }>('/ai/config')).data
+    aiModels.value = { ...ai.value.defaults.models }
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Failed to load AI config'
+  }
+}
+
+async function saveAi() {
+  saving.value = true
+  error.value = ''
+  saved.value = false
+  try {
+    const res = await apiRequest<{ data: { defaults: AiConfig['defaults'] } }>('/ai/config', {
+      method: 'PUT',
+      body: JSON.stringify({ provider: ai.value?.provider, models: aiModels.value }),
+    })
+    aiModels.value = { ...res.data.defaults.models }
+    saved.value = true
+    setTimeout(() => (saved.value = false), 2000)
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Save failed'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function checkHealth() {
+  checkingHealth.value = true
+  try {
+    aiHealth.value = (await apiRequest<{ data: AiHealth }>('/ai/health')).data
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Health check failed'
+  } finally {
+    checkingHealth.value = false
+  }
+}
+
 const fmtLimit = (v: number | null) => (v === null ? 'Unlimited' : String(v))
 const editionLabel = (e: string) => e.charAt(0).toUpperCase() + e.slice(1)
 const featureLabel = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadAi()
+})
 </script>
 
 <template>
   <AdminLayout>
     <div class="space-y-5">
       <div class="flex gap-6 border-b border-slate-200">
-        <button v-for="t in (['regional', 'subscription', 'about'] as const)" :key="t" @click="tab = t"
+        <button v-for="t in (['regional', 'ai', 'subscription', 'about'] as const)" :key="t" @click="tab = t"
           class="pb-2.5 text-sm font-medium border-b-2 -mb-px transition capitalize"
           :class="tab === t ? 'border-airr-500 text-airr-600' : 'border-transparent text-slate-500 hover:text-slate-700'">
-          {{ t }}
+          {{ t === 'ai' ? 'AI / Models' : t }}
         </button>
       </div>
 
@@ -107,6 +171,64 @@ onMounted(load)
           </button>
           <span v-if="saved" class="text-sm text-emerald-600">✓ Saved</span>
         </div>
+      </div>
+
+      <!-- AI / MODELS -->
+      <div v-else-if="tab === 'ai' && ai" class="space-y-4 max-w-2xl">
+        <div class="bg-white rounded-xl border border-slate-100 p-6 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="font-semibold text-slate-700">System-default models</h3>
+              <p class="text-xs text-slate-400">On-premise via <span class="font-medium capitalize">{{ ai.provider }}</span> · no external AI APIs. Projects may override these.</p>
+            </div>
+          </div>
+          <div class="space-y-3">
+            <div v-for="t in ai.tasks" :key="t">
+              <label class="block text-sm font-medium text-slate-600 mb-1">{{ TASK_LABELS[t] ?? t }}</label>
+              <input v-model="aiModels[t]" list="ai-model-list"
+                class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
+            </div>
+            <datalist id="ai-model-list">
+              <option v-for="m in (aiHealth?.models ?? [])" :key="m.name" :value="m.name" />
+            </datalist>
+          </div>
+          <div class="flex items-center gap-3 pt-1">
+            <button @click="saveAi" :disabled="saving"
+              class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-4 py-2 disabled:opacity-50">
+              {{ saving ? 'Saving…' : 'Save defaults' }}
+            </button>
+            <span v-if="saved" class="text-sm text-emerald-600">✓ Saved</span>
+          </div>
+        </div>
+
+        <!-- Provider health -->
+        <div class="bg-white rounded-xl border border-slate-100 p-6 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-slate-700">Provider health</h3>
+            <button @click="checkHealth" :disabled="checkingHealth"
+              class="text-sm font-medium text-airr-600 border border-airr-200 hover:bg-airr-50 rounded-lg px-3 py-1.5 disabled:opacity-50">
+              {{ checkingHealth ? 'Checking…' : 'Check now' }}
+            </button>
+          </div>
+          <div v-if="aiHealth" class="text-sm space-y-2">
+            <div class="flex items-center gap-2">
+              <span :class="aiHealth.reachable ? 'text-emerald-500' : 'text-airr-500'">●</span>
+              <span class="text-slate-600">{{ aiHealth.provider }} — {{ aiHealth.reachable ? 'reachable' : 'unreachable' }}</span>
+            </div>
+            <div v-if="aiHealth.reachable">
+              <div class="text-slate-500 mb-1">Installed models ({{ aiHealth.models.length }})</div>
+              <div class="flex flex-wrap gap-1.5">
+                <span v-for="m in aiHealth.models" :key="m.name" class="text-xs bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">{{ m.name }}</span>
+                <span v-if="!aiHealth.models.length" class="text-xs text-slate-400">none pulled yet</span>
+              </div>
+            </div>
+          </div>
+          <p v-else class="text-xs text-slate-400">Run a check to see if {{ ai.provider }} is up and which models are installed.</p>
+        </div>
+
+        <p v-if="!ai.per_project" class="text-xs text-slate-400">
+          Per-project model override is available on Standard & Enterprise editions.
+        </p>
       </div>
 
       <!-- SUBSCRIPTION -->
