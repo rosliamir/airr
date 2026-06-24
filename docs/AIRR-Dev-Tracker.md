@@ -28,6 +28,9 @@
 | [ ] | FR-M15.3 | Self-hosted Dev/Staging/Prod (Linux + Windows) | ⬜ | | |
 | [x] | FR-M15.4 | Containerised pipeline (build/migrate/promote) — *CI asas* | ✅ | 2026-06-22 | — |
 | [ ] | FR-M15.5 | Deploy penuh dalam Malaysian DC + air-gap capable | ⬜ | | |
+| [ ] | FR-M15.6 | **AI Provider abstraction** (`AiProvider` interface; Ollama impl pertama) + **system-default** model config (per-task: embedding/generation/reasoning/audit) — config, bukan hard-code | ⬜ | | |
+| [ ] | FR-M15.7 | **Model management** — list/pull/health-check model Ollama; tukar model tanpa redeploy | ⬜ | | |
+| [ ] | FR-M15.8 | **`resolveModel(project, task)` resolver** — cek per-project config → fallback system default; satu titik panggilan untuk M3/M4 | ⬜ | | |
 
 ### M14 — Governance (item Phase 0)
 | ✓ | FR | Requirement | Status | Tarikh | Masa |
@@ -37,6 +40,8 @@
 | [x] | FR-M14.x | **Projects** — CRUD + assign users/groups + scoping (reports stored by project) | ✅ | 2026-06-22 | 17:28 |
 | [x] | FR-M1.5+ | Audit log — searchable + paginated 10/page + expandable detail | ✅ | 2026-06-22 | 17:28 |
 | [x] | FR-M14.4b | **Settings** — Regional (editable), Subscription (limits/features), About | ✅ | 2026-06-22 | 19:10 |
+| [ ] | FR-M14.5 | **Per-project AI config** — setiap projek pilih provider+model **per-task** (embedding/generation/reasoning/audit); kosong = warisi system default. Simpan `projects.ai_config` (JSONB). Gated: Community=default sahaja, Standard=pilih model dipasang, Enterprise=dedicated/tuned | ⬜ | | |
+| [ ] | FR-M14.6 | **Settings → AI/Models tab** — admin set system-default + uji health model (UI; boleh tangguh selepas resolver siap) | ⬜ | | |
 | [ ] | — | Commit kerja auth + seeder ke git | ⬜ | | |
 
 ---
@@ -46,14 +51,14 @@
 ### M2 — Data Source Connector
 | ✓ | FR | Requirement | Status | Tarikh | Masa |
 |---|---|---|---|---|---|
-| [ ] | FR-M2.1 | Connect PostgreSQL / MySQL / SQL Server (query atau table) | ⬜ | | |
-| [ ] | FR-M2.2 | Connect REST/GraphQL (auth + pagination) | ⬜ | | |
-| [ ] | FR-M2.3 | Ingest CSV / Excel / JSON sebagai sumber data | ⬜ | | |
-| [ ] | FR-M2.4 | Introspect schema (table/column/type/relationship) + cache metadata | ⬜ | | |
-| [ ] | FR-M2.5 | Saved/parameterized queries + runtime params | ⬜ | | |
+| [x] | FR-M2.1 | Connect PostgreSQL + MySQL + Oracle (all tested real); SQL Server scaffolded | ✅ | 2026-06-23 | |
+| [x] | FR-M2.2 | Connect REST API (auth bearer/header); GraphQL scaffolded | ✅🟡 | 2026-06-23 | 10:39 |
+| [x] | FR-M2.3 | Ingest CSV / Excel / JSON files (upload, parse, preview, param-filter) | ✅ | 2026-06-23 | |
+| [x] | FR-M2.4 | Introspect schema (table/column/type) + cache (schema_cache) | ✅ | 2026-06-23 | 10:39 |
+| [x] | FR-M2.5 | Datasets: SQL/API + runtime params + preview (bound, SELECT-guarded) | ✅ | 2026-06-23 | 10:39 |
 | [ ] | FR-M2.6 | RAG collection sebagai data source | ⬜ | | |
 | [ ] | FR-M2.7 | Cache result set (TTL + invalidation) | ⬜ | | |
-| [ ] | FR-M2.8 | Simpan credential connection encrypted-at-rest | ⬜ | | |
+| [x] | FR-M2.8 | Credentials encrypted-at-rest (encrypted:array cast) | ✅ | 2026-06-23 | 10:39 |
 
 ### M6 — Report Engine & Definition
 | ✓ | FR | Requirement | Status | Tarikh | Masa |
@@ -96,7 +101,8 @@
 ## ⚠️ INFRA GATE — prasyarat Phase 3 (wajib siap dulu)
 | ✓ | Tugas | Status | Tarikh | Masa |
 |---|---|---|---|---|
-| [ ] | Pasang Ollama (LLM tempatan, on-prem) | 🔒 | | |
+| [ ] | Pasang Ollama (LLM tempatan, on-prem) + pull model (embedding + generation) | 🔒 | | |
+| [ ] | Implement `AiProvider` abstraction + `resolveModel()` (FR-M15.6/M15.8) | 🔒 | | |
 | [ ] | Load pgai extension dalam DB `airr` | 🔒 | | |
 | [ ] | Sambung rag_api → `services/rag_api` + run skeleton | 🔒 | | |
 

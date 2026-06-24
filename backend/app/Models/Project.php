@@ -17,11 +17,11 @@ class Project extends Model
 
     const STATUSES = [self::STATUS_ACTIVE, self::STATUS_ON_HOLD, self::STATUS_COMPLETED, self::STATUS_ARCHIVED];
 
-    protected $fillable = ['code', 'name', 'customer_name', 'type', 'color', 'status', 'start_date', 'end_date', 'description', 'created_by'];
+    protected $fillable = ['code', 'name', 'customer_name', 'type', 'color', 'status', 'start_date', 'end_date', 'description', 'ai_config', 'created_by'];
 
     protected function casts(): array
     {
-        return ['start_date' => 'date', 'end_date' => 'date'];
+        return ['start_date' => 'date', 'end_date' => 'date', 'ai_config' => 'array'];
     }
 
     public function users(): BelongsToMany
@@ -37,5 +37,21 @@ class Project extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * Owner+membership visibility (FR-M14.3): projects the viewer created, is a
+     * direct member of, or whose assigned group the viewer belongs to. Caller
+     * checks $viewer->seesEverything() first to bypass.
+     */
+    public function scopeVisibleTo($query, User $viewer)
+    {
+        return $query->where(function ($q) use ($viewer) {
+            $q->where('created_by', $viewer->id)
+                ->orWhereHas('users', fn ($u) => $u->where('users.id', $viewer->id));
+            if ($viewer->user_group_id) {
+                $q->orWhereHas('groups', fn ($g) => $g->where('user_groups.id', $viewer->user_group_id));
+            }
+        });
     }
 }

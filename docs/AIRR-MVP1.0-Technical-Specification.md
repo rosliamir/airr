@@ -198,6 +198,9 @@ All application data, uploaded documents and vector embeddings reside exclusivel
 | FR-M15.3 | Run self-hosted across Dev/Staging/Prod on Linux and Windows. | M |
 | FR-M15.4 | Provide a containerised deployment pipeline (build, migrate, promote). | M |
 | FR-M15.5 | Deployable entirely within a Malaysian data center and air-gap capable. | M |
+| FR-M15.6 | Provide an **`AiProvider` abstraction** (Ollama as first implementation; on-premise only, no external egress) with a **system-default model config** selectable **per task** (embedding / generation / reasoning / audit). Config-driven, not hard-coded. | M |
+| FR-M15.7 | **Model management** — list / pull / health-check local models; swap models without redeploy. | M |
+| FR-M15.8 | Provide a single **`resolveModel(project, task)`** resolver: per-project config overrides system default; consumed by M3 (embedding) and M4 (agents). | M |
 
 ## GROUP 2 — Intelligence (AI & Knowledge)
 
@@ -321,6 +324,8 @@ All application data, uploaded documents and vector embeddings reside exclusivel
 | FR-M14.2 | Provide template & version governance (approval/publish workflow). | M |
 | FR-M14.3 | Provide baseline multi-tenant isolation. | M |
 | FR-M14.4 | Provide global system and branding settings. | M |
+| FR-M14.5 | **Per-project AI configuration** — each project selects provider + model **per task** (embedding/generation/reasoning/audit); empty = inherit system default (FR-M15.6). Stored as `projects.ai_config` (JSONB). Gated: Community=default only; Standard=choose installed models; Enterprise=dedicated/tuned. | M |
+| FR-M14.6 | **Settings → AI/Models tab** — admin sets system default and health-checks models (UI may follow the resolver). | M |
 
 ---
 
@@ -340,6 +345,15 @@ Combines unstructured retrieval (RAG text) with structured query results (SQL) i
 
 ## 8.3 Semantic Schema Caching (Text-to-SQL accuracy)
 Per-table/column documentation stored in RAG. Before SQL generation, resolve business terms (e.g., "active" → `status = 1`) to prevent Text-to-SQL errors.
+
+## 8.3a AI Provider & Model Resolution (M15.6–M15.8, M14.5)
+On-premise only (Ollama); **no external AI egress**. A single `AiProvider` abstraction decouples callers from the engine, so editions can swap implementations (Standard = Ollama; Enterprise = dedicated/tuned LLM) without code change.
+
+**Hierarchical config (per task):**
+```
+System default (admin)  →  Project override (projects.ai_config, JSONB)  →  resolveModel(project, task)
+```
+Tasks: `embedding` · `generation` · `reasoning` · `audit`. Empty project config inherits the system default. All AI callers (M3 ingestion/retrieval, M4 agents) MUST go through `resolveModel()` — never reference a model name directly.
 
 ## 8.4 Ingestion Pipeline (M3)
 Multi-format intake (PDF/DOCX/XLSX/MD) → structure-aware chunking → diagram/table-to-text conversion → pgai embedding → pgvector storage → indexed for retrieval. Status tracked; re-indexable.
