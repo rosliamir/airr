@@ -29,6 +29,7 @@ return [
         'all_connectors'      => ['standard', 'enterprise'],
         'rbac_full'           => ['standard', 'enterprise'],
         'mpsa_checks'         => ['standard', 'enterprise'],
+        'project_ai_config'   => ['standard', 'enterprise'], // per-project model override (FR-M14.5); Community = system default only
 
         // Enterprise only
         'zero_trust_rag'      => ['enterprise'],

@@ -28,9 +28,9 @@
 | [ ] | FR-M15.3 | Self-hosted Dev/Staging/Prod (Linux + Windows) | ⬜ | | |
 | [x] | FR-M15.4 | Containerised pipeline (build/migrate/promote) — *CI asas* | ✅ | 2026-06-22 | — |
 | [ ] | FR-M15.5 | Deploy penuh dalam Malaysian DC + air-gap capable | ⬜ | | |
-| [ ] | FR-M15.6 | **AI Provider abstraction** (`AiProvider` interface; Ollama impl pertama) + **system-default** model config (per-task: embedding/generation/reasoning/audit) — config, bukan hard-code | ⬜ | | |
-| [ ] | FR-M15.7 | **Model management** — list/pull/health-check model Ollama; tukar model tanpa redeploy | ⬜ | | |
-| [ ] | FR-M15.8 | **`resolveModel(project, task)` resolver** — cek per-project config → fallback system default; satu titik panggilan untuk M3/M4 | ⬜ | | |
+| [x] | FR-M15.6 | **AI Provider abstraction** (`AiProvider` interface; `OllamaProvider` impl) + **system-default** model config per-task (config/ai.php) — config, bukan hard-code | ✅ | 2026-06-24 | |
+| [x] | FR-M15.7 | **Model management** — `listModels()/pull()/health()` di provider (UI tab kemudian) | ✅🟡 | 2026-06-24 | |
+| [x] | FR-M15.8 | **`ModelResolver::resolve(task, project)`** — project override (edition-gated) → fallback system default; satu titik untuk M3/M4 | ✅ | 2026-06-24 | |
 
 ### M14 — Governance (item Phase 0)
 | ✓ | FR | Requirement | Status | Tarikh | Masa |
@@ -102,7 +102,7 @@
 | ✓ | Tugas | Status | Tarikh | Masa |
 |---|---|---|---|---|
 | [ ] | Pasang Ollama (LLM tempatan, on-prem) + pull model (embedding + generation) | 🔒 | | |
-| [ ] | Implement `AiProvider` abstraction + `resolveModel()` (FR-M15.6/M15.8) | 🔒 | | |
+| [x] | Implement `AiProvider` abstraction + `resolveModel()` (FR-M15.6/M15.8) | ✅ | 2026-06-24 | |
 | [ ] | Load pgai extension dalam DB `airr` | 🔒 | | |
 | [ ] | Sambung rag_api → `services/rag_api` + run skeleton | 🔒 | | |
 

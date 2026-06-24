@@ -2,8 +2,10 @@
 
 namespace App\Providers;
 
+use App\Services\Ai\AiProvider;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -12,7 +14,20 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Bind the active AI provider (FR-M15.6). Resolved from config/ai.php so
+        // editions can swap the engine without touching call sites.
+        $this->app->singleton(AiProvider::class, function () {
+            $key = (string) config('ai.provider', 'ollama');
+            $cfg = config("ai.providers.{$key}");
+            if (! is_array($cfg) || empty($cfg['driver'])) {
+                throw new InvalidArgumentException("AI provider [{$key}] is not configured in config/ai.php.");
+            }
+
+            return new $cfg['driver'](
+                (string) ($cfg['url'] ?? ''),
+                (int) ($cfg['timeout'] ?? 120),
+            );
+        });
     }
 
     /**
