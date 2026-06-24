@@ -1,0 +1,12 @@
+[
+  { "name": "Malayan Banking Berhad", "short": "Maybank", "swift": "MBBEMYKL", "type": "Commercial" },
+  { "name": "CIMB Bank Berhad", "short": "CIMB", "swift": "CIBBMYKL", "type": "Commercial" },
+  { "name": "Public Bank Berhad", "short": "Public Bank", "swift": "PBBEMYKL", "type": "Commercial" },
+  { "name": "RHB Bank Berhad", "short": "RHB", "swift": "RHBBMYKL", "type": "Commercial" },
+  { "name": "Hong Leong Bank Berhad", "short": "Hong Leong", "swift": "HLBBMYKL", "type": "Commercial" },
+  { "name": "AmBank (M) Berhad", "short": "AmBank", "swift": "ARBKMYKL", "type": "Commercial" },
+  { "name": "Bank Islam Malaysia Berhad", "short": "Bank Islam", "swift": "BIMBMYKL", "type": "Islamic" },
+  { "name": "Bank Kerjasama Rakyat Malaysia", "short": "Bank Rakyat", "swift": "BKRMMYKL", "type": "Islamic Cooperative" },
+  { "name": "Bank Simpanan Nasional", "short": "BSN", "swift": "BSNAMYK1", "type": "Development" },
+  { "name": "OCBC Bank (Malaysia) Berhad", "short": "OCBC", "swift": "OCBCMYKL", "type": "Commercial" }
+]

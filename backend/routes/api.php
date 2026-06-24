@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Api\AuditController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\DatasetController;
+use App\Http\Controllers\Api\DataSourceController;
 use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SettingsController;
@@ -65,6 +67,26 @@ Route::middleware('auth:sanctum')->group(function () {
     // M14 — global settings
     Route::get('settings', [SettingsController::class, 'index'])->middleware('permission:settings.manage');
     Route::put('settings/regional', [SettingsController::class, 'updateRegional'])->middleware('permission:settings.manage');
+
+    // M2 — Data Sources (connections) + Datasets (queries/params)
+    Route::middleware('permission:datasources.view')->group(function () {
+        Route::get('data-sources', [DataSourceController::class, 'index']);
+        Route::get('data-sources/{dataSource}', [DataSourceController::class, 'show']);
+        Route::get('data-sources/{dataSource}/datasets', [DatasetController::class, 'index']);
+    });
+    Route::middleware('permission:datasources.manage')->group(function () {
+        Route::post('data-sources', [DataSourceController::class, 'store']);
+        Route::put('data-sources/{dataSource}', [DataSourceController::class, 'update']);
+        Route::delete('data-sources/{dataSource}', [DataSourceController::class, 'destroy']);
+        Route::post('data-sources/{dataSource}/test', [DataSourceController::class, 'test']);
+        Route::post('data-sources/{dataSource}/introspect', [DataSourceController::class, 'introspect']);
+        Route::post('data-sources/{dataSource}/upload', [DataSourceController::class, 'uploadFile']);
+
+        Route::post('data-sources/{dataSource}/datasets', [DatasetController::class, 'store']);
+        Route::put('datasets/{dataset}', [DatasetController::class, 'update']);
+        Route::delete('datasets/{dataset}', [DatasetController::class, 'destroy']);
+        Route::post('datasets/{dataset}/preview', [DatasetController::class, 'preview']);
+    });
 
     // M14 — projects (reports are stored by project)
     Route::get('projects', [ProjectController::class, 'index'])->middleware('permission:projects.view');

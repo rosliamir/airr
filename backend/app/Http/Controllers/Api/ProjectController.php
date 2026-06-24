@@ -25,13 +25,7 @@ class ProjectController extends Controller
         // Owner+membership scoping — admins see everything.
         $viewer = $request->user();
         if (! $viewer->seesEverything()) {
-            $query->where(function ($q) use ($viewer) {
-                $q->where('created_by', $viewer->id)
-                    ->orWhereHas('users', fn ($u) => $u->where('users.id', $viewer->id));
-                if ($viewer->user_group_id) {
-                    $q->orWhereHas('groups', fn ($g) => $g->where('user_groups.id', $viewer->user_group_id));
-                }
-            });
+            $query->visibleTo($viewer);
         }
 
         if ($status = $request->input('status')) {

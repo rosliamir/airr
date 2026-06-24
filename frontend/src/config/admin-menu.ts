@@ -34,7 +34,7 @@ export const adminMenu: MenuGroup[] = [
   {
     title: 'Data & Intelligence',
     items: [
-      { label: 'Data Sources', route: 'datasources', icon: 'Database', module: 'M2', permission: 'datasources.view', phase: 1, ready: false },
+      { label: 'Data Sources', route: 'datasources', icon: 'Database', module: 'M2', permission: 'datasources.view', phase: 1, ready: true },
       { label: 'Knowledge Base', route: 'knowledge-base', icon: 'BookOpen', module: 'M3', permission: 'kb.view', phase: 2, ready: false },
       { label: 'AI Orchestration', route: 'ai-orchestration', icon: 'Bot', module: 'M4', permission: 'reports.create', feature: 'multi_agent', phase: 3, ready: false },
     ],
