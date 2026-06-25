@@ -17,17 +17,19 @@
 | `tests/Feature/AiConfigApiTest.php` | FR-M14.6/M14.5 — index, update, health, permission gate, project ai_config | 5 | ✅ | 2026-06-24 |
 | `tests/Feature/DataSourceTest.php` | FR-M2.8/M2.3/M2.4 — encryption-at-rest, masking, validation, file upload+schema, permission gate | 6 | ✅ | 2026-06-24 |
 | `tests/Feature/ConnectorServiceTest.php` | FR-M2.5 — SELECT guardrail, multi-statement guard, file dataset param filter | 3 | ✅ | 2026-06-24 |
-
-**Total: 30 test, 77 assertions, semua lulus** (`php artisan test`, 2026-06-24).
+| `tests/Unit/ChunkerServiceTest.php` | FR-M3.3 — heading split, single chunk, oversized split, paragraph packing, empty | 5 | ✅ | 2026-06-25 |
+| `tests/Feature/KnowledgeBaseTest.php` | FR-M3.1/M3.2/M3.6 — CRUD, permission gate, md ingest→chunks, unsupported type, reindex, cascade delete | 6 | ✅ | 2026-06-25 |
+| `tests/Feature/AuthTest.php` | FR-M1.1 — login, bad creds, pending gate, self-register, me auth/payload | 6 | ✅ | 2026-06-25 |
+| `tests/Feature/AdminCrudTest.php` | FR-M14.3/M14.x — project CRUD, owner scoping, user create, RBAC gating | 5 | ✅ | 2026-06-25 |
 
 ## Belum ada test (hutang test — tambah bila disentuh)
 
 | Modul | FR | Catatan |
 |---|---|---|
 | M2 DB/API connectors (live) | FR-M2.1,2.2 | `test()`/`introspect()` atas DB sebenar — perlu instance; guard + file path sudah ditest |
-| M1 Auth/RBAC | FR-M1.1,1.2,1.5 | Login, OAuth, RBAC, audit — **belum ada test** |
-| M14 Users/Roles/Projects | FR-M14.3,14.4,14.x | CRUD + scoping — **belum ada test** |
-| M3 ingestion penuh | FR-M3.3,3.5,3.6,3.8,3.10 | 🔒 tunggu Ollama + pgvector |
+| M1 OAuth + password reset | FR-M1.1 | Google OAuth + reset flow — login/register/me sudah ditest |
+| M14 Roles/Groups CRUD | FR-M14.4a | Projects + users ditest; roles/groups CRUD belum |
+| M3 embedding + retrieval | FR-M3.5,3.8,3.10 | 🔒 tunggu Ollama + pgvector (chunking + ingest sudah ditest) |
 
 ## Frontend
 | Area | Status | Catatan |
