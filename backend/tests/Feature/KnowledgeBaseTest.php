@@ -51,6 +51,42 @@ class KnowledgeBaseTest extends TestCase
         $this->assertNotNull($kb->fresh()->embedding_model);
     }
 
+    public function test_upload_records_document_category(): void // FR-M3.2 taxonomy
+    {
+        Storage::fake('local');
+        $this->actingWithPermissions(['kb.manage']);
+        $kb = KnowledgeBase::create(['name' => 'Specs', 'version' => 1]);
+        $file = UploadedFile::fake()->createWithContent('srs.md', "# SRS\nRequirement.");
+
+        $this->postJson("/api/knowledge-bases/{$kb->id}/documents", ['file' => $file, 'category' => 'srs'])
+            ->assertCreated()
+            ->assertJsonPath('data.category', 'srs')
+            ->assertJsonPath('data.source_kind', 'upload');
+
+        $this->assertDatabaseHas('kb_documents', ['category' => 'srs', 'source_kind' => 'upload']);
+    }
+
+    public function test_other_category_keeps_custom_label(): void
+    {
+        Storage::fake('local');
+        $this->actingWithPermissions(['kb.manage']);
+        $kb = KnowledgeBase::create(['name' => 'Misc', 'version' => 1]);
+        $file = UploadedFile::fake()->createWithContent('note.md', "# Note\nText.");
+
+        $this->postJson("/api/knowledge-bases/{$kb->id}/documents", [
+            'file' => $file, 'category' => 'other', 'category_label' => 'Release Note',
+        ])->assertCreated()->assertJsonPath('data.category_label', 'Release Note');
+    }
+
+    public function test_categories_endpoint_lists_taxonomy(): void
+    {
+        $this->actingWithPermissions(['kb.view']);
+        $this->getJson('/api/knowledge-bases/categories')
+            ->assertOk()
+            ->assertJsonPath('data.documents.srs', 'Software Requirement Spec (SRS)')
+            ->assertJsonPath('data.documents.urs', 'User Requirement Spec (URS)');
+    }
+
     public function test_rejects_unsupported_file_type(): void
     {
         Storage::fake('local');

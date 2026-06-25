@@ -12,6 +12,7 @@ use App\Services\AuditService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 // M3 (FR-M3.2/M3.6) — upload reference documents into a KB and run the
 // ingestion pipeline (extract → chunk → store). kb.manage for writes.
@@ -34,8 +35,11 @@ class KbDocumentController extends Controller
     // FR-M3.1 — upload a document, then ingest it synchronously.
     public function store(Request $request, KnowledgeBase $knowledgeBase): JsonResponse
     {
-        $request->validate([
-            'file' => 'required|file|mimes:pdf,docx,xlsx,xls,md,markdown,txt|max:20480',
+        $categories = array_keys(config('kb.document_categories', []));
+        $validated = $request->validate([
+            'file'           => 'required|file|mimes:pdf,docx,xlsx,xls,md,markdown,txt|max:20480',
+            'category'       => ['nullable', Rule::in($categories)],
+            'category_label' => 'nullable|string|max:80', // custom label when category = other
         ]);
 
         $upload = $request->file('file');
@@ -44,13 +48,17 @@ class KbDocumentController extends Controller
             return $this->sendError(422, 'UNSUPPORTED_TYPE', 'Unsupported document type.');
         }
 
+        $category = $validated['category'] ?? 'other';
         $path = $upload->store('kb_documents', 'local');
         $document = $knowledgeBase->documents()->create([
-            'title'      => $upload->getClientOriginalName(),
-            'type'       => $type,
-            'path'       => $path,
-            'status'     => KbDocument::STATUS_QUEUED,
-            'created_by' => $request->user()->id,
+            'title'          => $upload->getClientOriginalName(),
+            'type'           => $type,
+            'category'       => $category,
+            'category_label' => $category === 'other' ? ($validated['category_label'] ?? null) : null,
+            'source_kind'    => KbDocument::SOURCE_UPLOAD,
+            'path'           => $path,
+            'status'         => KbDocument::STATUS_QUEUED,
+            'created_by'     => $request->user()->id,
         ]);
 
         // Record the embedding model that will apply (resolved centrally), then ingest.
@@ -86,15 +94,23 @@ class KbDocumentController extends Controller
 
     private function row(KbDocument $d): array
     {
+        $categories = config('kb.document_categories', []);
+        $categoryName = $d->category === 'other' && $d->category_label
+            ? $d->category_label
+            : ($categories[$d->category] ?? $d->category);
+
         return [
-            'id'          => $d->id,
-            'title'       => $d->title,
-            'type'        => $d->type,
-            'status'      => $d->status,
-            'chunk_count' => $d->chunk_count,
-            'error'       => $d->error,
-            'trained_at'  => $d->trained_at,
-            'created_at'  => $d->created_at,
+            'id'             => $d->id,
+            'title'          => $d->title,
+            'type'           => $d->type,
+            'category'       => $d->category,
+            'category_label' => $categoryName, // resolved display label
+            'source_kind'    => $d->source_kind,
+            'status'         => $d->status,
+            'chunk_count'    => $d->chunk_count,
+            'error'          => $d->error,
+            'trained_at'     => $d->trained_at,
+            'created_at'     => $d->created_at,
         ];
     }
 }

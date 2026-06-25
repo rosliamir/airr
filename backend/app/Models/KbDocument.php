@@ -14,9 +14,14 @@ class KbDocument extends Model
     const STATUS_TRAINED = 'trained';
     const STATUS_ERROR = 'error';
 
+    // How the item entered the KB.
+    const SOURCE_UPLOAD = 'upload';        // user-uploaded file
+    const SOURCE_INTEGRATION = 'integration'; // pulled from an external system (e.g. helpdesk)
+    const SOURCE_SYSTEM = 'system';        // introspected from AIRR itself (schema/menu/rbac…)
+
     protected $fillable = [
-        'knowledge_base_id', 'title', 'type', 'path', 'status',
-        'error', 'chunk_count', 'trained_at', 'created_by',
+        'knowledge_base_id', 'title', 'type', 'category', 'category_label', 'source_kind',
+        'path', 'status', 'error', 'chunk_count', 'trained_at', 'created_by',
     ];
 
     protected function casts(): array

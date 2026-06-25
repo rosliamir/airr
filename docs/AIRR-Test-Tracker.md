@@ -18,7 +18,7 @@
 | `tests/Feature/DataSourceTest.php` | FR-M2.8/M2.3/M2.4 — encryption-at-rest, masking, validation, file upload+schema, permission gate | 6 | ✅ | 2026-06-24 |
 | `tests/Feature/ConnectorServiceTest.php` | FR-M2.5 — SELECT guardrail, multi-statement guard, file dataset param filter | 3 | ✅ | 2026-06-24 |
 | `tests/Unit/ChunkerServiceTest.php` | FR-M3.3 — heading split, single chunk, oversized split, paragraph packing, empty | 5 | ✅ | 2026-06-25 |
-| `tests/Feature/KnowledgeBaseTest.php` | FR-M3.1/M3.2/M3.6 — CRUD, permission gate, md ingest→chunks, unsupported type, reindex, cascade delete | 6 | ✅ | 2026-06-25 |
+| `tests/Feature/KnowledgeBaseTest.php` | FR-M3.1/M3.2/M3.2a/M3.6 — CRUD, gate, ingest→chunks, **category + other-label + categories endpoint**, unsupported type, reindex, cascade | 9 | ✅ | 2026-06-25 |
 | `tests/Feature/AuthTest.php` | FR-M1.1 — login, bad creds, pending gate, self-register, me auth/payload | 6 | ✅ | 2026-06-25 |
 | `tests/Feature/AdminCrudTest.php` | FR-M14.3/M14.x — project CRUD, owner scoping, user create, RBAC gating | 5 | ✅ | 2026-06-25 |
 

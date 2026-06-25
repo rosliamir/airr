@@ -7,6 +7,7 @@ import { useAuthStore } from '../stores/auth'
 type Project = { id: number; code: string; name: string }
 type KbDocument = {
   id: number; title: string; type: string; status: string
+  category: string; category_label: string; source_kind: string
   chunk_count: number; error: string | null; trained_at: string | null
 }
 type KnowledgeBase = {
@@ -36,6 +37,11 @@ const statusBadge: Record<string, string> = {
 const showForm = ref(false)
 const form = ref({ name: '', description: '', tags: '', project_id: null as number | null })
 
+// Document category taxonomy (FR-M3.2) + upload selection.
+const categories = ref<Record<string, string>>({})
+const uploadCategory = ref('srs')
+const uploadOtherLabel = ref('')
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -46,6 +52,9 @@ async function load() {
     ])
     kbs.value = k.data
     projects.value = p.data
+    if (!Object.keys(categories.value).length) {
+      categories.value = (await apiRequest<{ data: { documents: Record<string, string> } }>('/knowledge-bases/categories')).data.documents
+    }
   } catch (e) {
     error.value = e instanceof ApiException ? e.error.message : 'Failed to load knowledge bases'
   } finally {
@@ -108,6 +117,8 @@ async function onUpload(e: Event) {
   try {
     const fd = new FormData()
     fd.append('file', file)
+    fd.append('category', uploadCategory.value)
+    if (uploadCategory.value === 'other' && uploadOtherLabel.value) fd.append('category_label', uploadOtherLabel.value)
     await uploadFile(`/knowledge-bases/${selected.value.id}/documents`, fd)
     await openDetail(selected.value)
     await load()
@@ -198,11 +209,23 @@ onMounted(load)
             </div>
 
             <!-- Upload -->
-            <div v-if="canManage" class="border border-dashed border-slate-200 rounded-lg p-4">
-              <label class="block text-sm font-medium text-slate-600 mb-1">Upload reference document</label>
+            <div v-if="canManage" class="border border-dashed border-slate-200 rounded-lg p-4 space-y-3">
+              <label class="block text-sm font-medium text-slate-600">Upload reference document</label>
+              <div class="flex flex-wrap items-end gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-slate-500 mb-1">Document type</label>
+                  <select v-model="uploadCategory" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:ring-2 focus:ring-airr-300 outline-none">
+                    <option v-for="(label, key) in categories" :key="key" :value="key">{{ label }}</option>
+                  </select>
+                </div>
+                <div v-if="uploadCategory === 'other'">
+                  <label class="block text-xs font-medium text-slate-500 mb-1">Specify type</label>
+                  <input v-model="uploadOtherLabel" placeholder="e.g. Release Note" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
+                </div>
+              </div>
               <input type="file" accept=".pdf,.docx,.xlsx,.xls,.md,.markdown,.txt" :disabled="uploading" @change="onUpload"
                 class="text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-airr-50 file:text-airr-700 file:px-3 file:py-1.5 file:text-sm" />
-              <p class="text-xs text-slate-400 mt-1">{{ uploading ? 'Ingesting…' : 'PDF, DOCX, XLSX, Markdown — auto-chunked.' }}</p>
+              <p class="text-xs text-slate-400">{{ uploading ? 'Ingesting…' : 'PDF, DOCX, XLSX, Markdown — auto-chunked.' }}</p>
             </div>
 
             <!-- Documents -->
@@ -212,7 +235,7 @@ onMounted(load)
               <table v-else class="w-full text-sm">
                 <thead>
                   <tr class="text-left text-xs text-slate-400 border-b border-slate-100">
-                    <th class="py-2">Title</th><th>Type</th><th>Status</th><th>Chunks</th><th></th>
+                    <th class="py-2">Title</th><th>Category</th><th>Type</th><th>Status</th><th>Chunks</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -221,6 +244,7 @@ onMounted(load)
                       {{ d.title }}
                       <div v-if="d.error" class="text-xs text-rose-500">{{ d.error }}</div>
                     </td>
+                    <td><span class="text-xs bg-airr-50 text-airr-700 rounded-full px-2 py-0.5">{{ d.category_label }}</span></td>
                     <td class="uppercase text-xs text-slate-400">{{ d.type }}</td>
                     <td><span class="text-xs rounded-full px-2 py-0.5" :class="statusBadge[d.status]">{{ d.status }}</span></td>
                     <td class="text-slate-600">{{ d.chunk_count }}</td>

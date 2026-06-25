@@ -37,6 +37,15 @@ class KnowledgeBaseController extends Controller
         return $this->sendOk($query->orderByDesc('created_at')->get()->map(fn ($kb) => $this->row($kb)));
     }
 
+    // Document category taxonomy for the upload UI (FR-M3.2).
+    public function categories(): JsonResponse
+    {
+        return $this->sendOk([
+            'documents' => config('kb.document_categories', []),
+            'system'    => config('kb.system_sources', []),
+        ]);
+    }
+
     public function show(KnowledgeBase $knowledgeBase): JsonResponse
     {
         $knowledgeBase->load(['project:id,code,name', 'documents' => fn ($q) => $q->orderByDesc('created_at')]);

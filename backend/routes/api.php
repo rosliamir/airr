@@ -100,6 +100,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // M3 — Knowledge Base (RAG) + documents (ingestion)
     Route::middleware('permission:kb.view')->group(function () {
+        Route::get('knowledge-bases/categories', [KnowledgeBaseController::class, 'categories']);
         Route::get('knowledge-bases', [KnowledgeBaseController::class, 'index']);
         Route::get('knowledge-bases/{knowledgeBase}', [KnowledgeBaseController::class, 'show']);
         Route::get('knowledge-bases/{knowledgeBase}/documents', [KbDocumentController::class, 'index']);

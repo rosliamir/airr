@@ -209,6 +209,9 @@ All application data, uploaded documents and vector embeddings reside exclusivel
 |---|---|---|
 | FR-M3.1 | Provide a "Train the Database" UI for admins to upload reference documents. | M |
 | FR-M3.2 | Ingest PDF, DOCX, XLSX and Markdown automatically. | M |
+| FR-M3.2a | Classify KB items by **document category** (URS, SRS, SDS, Test Script, UAT, User Manual, Help Desk Ticket, Other) chosen at upload. Config-driven taxonomy. | M |
+| FR-M3.2b | Ingest **system knowledge** (not just files): DB schema, ERD, data dictionary/reference codes, business glossary, business logic/workflow, UI screens, menu, RBAC, API catalog — introspected from AIRR and converted to descriptive text before embedding. | M |
+| FR-M3.2c | **Help Desk integration** — a Generic REST connector (base URL + auth) pulls tickets into the KB (source_kind = integration), in addition to manual upload. | M |
 | FR-M3.3 | Chunk documents by logical chapter/structure (not fixed word counts) using pgai. | M |
 | FR-M3.4 | Convert flowcharts/diagrams and tables in SRS/SDS into descriptive text before embedding. | M |
 | FR-M3.5 | Generate embeddings via pgai and store them in pgvector (HNSW). | M |
