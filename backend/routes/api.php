@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\AuditController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DatasetController;
 use App\Http\Controllers\Api\DataSourceController;
+use App\Http\Controllers\Api\KbDocumentController;
+use App\Http\Controllers\Api\KnowledgeBaseController;
 use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SettingsController;
@@ -94,6 +96,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('datasets/{dataset}', [DatasetController::class, 'update']);
         Route::delete('datasets/{dataset}', [DatasetController::class, 'destroy']);
         Route::post('datasets/{dataset}/preview', [DatasetController::class, 'preview']);
+    });
+
+    // M3 — Knowledge Base (RAG) + documents (ingestion)
+    Route::middleware('permission:kb.view')->group(function () {
+        Route::get('knowledge-bases', [KnowledgeBaseController::class, 'index']);
+        Route::get('knowledge-bases/{knowledgeBase}', [KnowledgeBaseController::class, 'show']);
+        Route::get('knowledge-bases/{knowledgeBase}/documents', [KbDocumentController::class, 'index']);
+    });
+    Route::middleware('permission:kb.manage')->group(function () {
+        Route::post('knowledge-bases', [KnowledgeBaseController::class, 'store']);
+        Route::put('knowledge-bases/{knowledgeBase}', [KnowledgeBaseController::class, 'update']);
+        Route::delete('knowledge-bases/{knowledgeBase}', [KnowledgeBaseController::class, 'destroy']);
+        Route::post('knowledge-bases/{knowledgeBase}/documents', [KbDocumentController::class, 'store']);
+        Route::post('kb-documents/{kbDocument}/reindex', [KbDocumentController::class, 'reindex']);
+        Route::delete('kb-documents/{kbDocument}', [KbDocumentController::class, 'destroy']);
     });
 
     // M14 — projects (reports are stored by project)

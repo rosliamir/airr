@@ -85,12 +85,12 @@
 ### M3 — Knowledge Base / RAG
 | ✓ | FR | Requirement | Status | Tarikh | Masa |
 |---|---|---|---|---|---|
-| [ ] | FR-M3.1 | "Train the Database" UI — upload reference docs | ⬜ | | |
-| [ ] | FR-M3.2 | Ingest PDF / DOCX / XLSX / Markdown auto | ⬜ | | |
-| [ ] | FR-M3.3 | Structure-aware chunking (pgai, bukan fixed word count) | ⬜ | | |
+| [x] | FR-M3.1 | "Train the Database" UI — KB CRUD + upload reference docs (KnowledgeBaseView) | ✅ | 2026-06-25 | |
+| [x] | FR-M3.2 | Ingest PDF / DOCX / XLSX / Markdown auto (DocumentExtractor) | ✅ | 2026-06-25 | |
+| [x] | FR-M3.3 | Structure-aware chunking (ChunkerService — heading/paragraph, bukan fixed count) | ✅ | 2026-06-25 | |
 | [ ] | FR-M3.4 | Tukar flowchart/diagram/table → descriptive text sebelum embed | ⬜ | | |
 | [ ] | FR-M3.5 | Embeddings via pgai → simpan pgvector (HNSW) | ⬜ | | |
-| [ ] | FR-M3.6 | Status ingestion (queued/processing/trained) + log error | ⬜ | | |
+| [x] | FR-M3.6 | Status ingestion (queued/processing/trained/error) + log error (IngestionService) | ✅ | 2026-06-25 | |
 | [ ] | FR-M3.7 | **Semantic schema cache** (term bisnes → table/column) | ⬜ | | |
 | [ ] | FR-M3.8 | Semantic retrieval (similarity search) untuk konteks prompt | ⬜ | | |
 | [ ] | FR-M3.9 | KB versioning, tagging, re-index, delete | ⬜ | | |
