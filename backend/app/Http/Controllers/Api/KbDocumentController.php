@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Traits\ApiResponse;
 use App\Models\KbDocument;
 use App\Models\KnowledgeBase;
+use App\Models\DataSource;
 use App\Services\Ai\DocumentExtractor;
 use App\Services\Ai\IngestionService;
+use App\Services\Ai\SystemKnowledgeService;
 use App\Services\AuditService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,6 +25,7 @@ class KbDocumentController extends Controller
     public function __construct(
         protected AuditService $audit,
         protected IngestionService $ingestion,
+        protected SystemKnowledgeService $system,
     ) {}
 
     public function index(KnowledgeBase $knowledgeBase): JsonResponse
@@ -72,9 +75,64 @@ class KbDocumentController extends Controller
         return $this->sendCreated($this->row($document));
     }
 
+    // FR-M3.2b — ingest AIRR's own system knowledge (DB schema, RBAC, …) into
+    // the KB as descriptive text. No file upload; source_kind = system.
+    public function ingestSystem(Request $request, KnowledgeBase $knowledgeBase): JsonResponse
+    {
+        $data = $request->validate([
+            'source'         => ['required', Rule::in(array_keys(config('kb.system_sources', [])))],
+            'data_source_id' => 'nullable|integer|exists:data_sources,id',
+        ]);
+
+        [$title, $text] = match ($data['source']) {
+            'db_schema' => $this->dbSchemaPayload($data['data_source_id'] ?? null),
+            'rbac'      => ['System knowledge: RBAC model', $this->system->rbac()],
+            default     => [null, null],
+        };
+
+        if ($text === null) {
+            return $this->sendError(422, 'UNSUPPORTED_SOURCE', 'This system source is not available yet.');
+        }
+
+        $document = $knowledgeBase->documents()->create([
+            'title'       => $title,
+            'type'        => 'markdown',
+            'category'    => $data['source'],
+            'source_kind' => KbDocument::SOURCE_SYSTEM,
+            'status'      => KbDocument::STATUS_QUEUED,
+            'created_by'  => $request->user()->id,
+        ]);
+        $knowledgeBase->update(['embedding_model' => $this->ingestion->embeddingModel($document)]);
+        $document = $this->ingestion->ingestText($document, $text);
+
+        $this->audit->log('kb.system_ingested', KbDocument::class, $document->id, null, [
+            'kb' => $knowledgeBase->id, 'source' => $data['source'], 'chunks' => $document->chunk_count,
+        ]);
+
+        return $this->sendCreated($this->row($document));
+    }
+
+    /** @return array{0:?string,1:?string} [title, text] */
+    private function dbSchemaPayload(?int $dataSourceId): array
+    {
+        if (! $dataSourceId) {
+            return [null, null];
+        }
+        $source = DataSource::find($dataSourceId);
+        if (! $source) {
+            return [null, null];
+        }
+
+        return ["System knowledge: schema of {$source->name}", $this->system->dbSchema($source)];
+    }
+
     // FR-M3.9 — re-index an existing document (re-extract + re-chunk).
     public function reindex(KbDocument $kbDocument): JsonResponse
     {
+        // System/integration docs have no stored file — re-ingest from the source.
+        if ($kbDocument->source_kind !== KbDocument::SOURCE_UPLOAD || ! $kbDocument->path) {
+            return $this->sendError(422, 'REINDEX_UNSUPPORTED', 'Re-ingest this item from its system source instead.');
+        }
         $document = $this->ingestion->ingest($kbDocument);
         $this->audit->log('kb.document_reindexed', KbDocument::class, $document->id, null, ['status' => $document->status]);
 

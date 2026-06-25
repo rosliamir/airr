@@ -22,15 +22,35 @@ class IngestionService
         private readonly ModelResolver $resolver,
     ) {}
 
-    /** Ingest one uploaded document. Returns the refreshed document. */
+    /** Ingest one uploaded document (extract file text → chunk). */
     public function ingest(KbDocument $document): KbDocument
+    {
+        return $this->run($document, function () use ($document) {
+            $absolute = Storage::disk('local')->path($document->path);
+
+            return $this->extractor->extract($document->type, $absolute);
+        });
+    }
+
+    /**
+     * Ingest a system-knowledge document from already-prepared descriptive text
+     * (FR-M3.2b) — DB schema, RBAC, menu, etc. No file extraction.
+     */
+    public function ingestText(KbDocument $document, string $text): KbDocument
+    {
+        return $this->run($document, fn () => $text);
+    }
+
+    /**
+     * Shared pipeline: resolve text via $produce, structure-aware chunk, persist
+     * (re-index safe), mark trained — or record the error. (FR-M3.3/M3.6)
+     */
+    private function run(KbDocument $document, callable $produce): KbDocument
     {
         $document->update(['status' => KbDocument::STATUS_PROCESSING, 'error' => null]);
 
         try {
-            $absolute = Storage::disk('local')->path($document->path);
-            $text = $this->extractor->extract($document->type, $absolute);
-            $chunks = $this->chunker->chunk($text);
+            $chunks = $this->chunker->chunk((string) $produce());
 
             DB::transaction(function () use ($document, $chunks) {
                 $document->chunks()->delete(); // re-index safe

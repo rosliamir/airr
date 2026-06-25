@@ -87,6 +87,44 @@ class KnowledgeBaseTest extends TestCase
             ->assertJsonPath('data.documents.urs', 'User Requirement Spec (URS)');
     }
 
+    public function test_ingests_db_schema_as_system_knowledge(): void // FR-M3.2b
+    {
+        $this->actingWithPermissions(['kb.manage']);
+        $kb = \App\Models\KnowledgeBase::create(['name' => 'System', 'version' => 1]);
+        $ds = \App\Models\DataSource::create([
+            'name' => 'CRM', 'type' => 'postgres', 'config' => ['host' => 'h'],
+            'schema_cache' => [
+                ['table' => 'customers', 'columns' => [['name' => 'id', 'type' => 'integer'], ['name' => 'status', 'type' => 'integer']]],
+                ['table' => 'orders', 'columns' => [['name' => 'id', 'type' => 'integer']]],
+            ],
+        ]);
+
+        $res = $this->postJson("/api/knowledge-bases/{$kb->id}/system", ['source' => 'db_schema', 'data_source_id' => $ds->id])
+            ->assertCreated()
+            ->assertJsonPath('data.category', 'db_schema')
+            ->assertJsonPath('data.source_kind', 'system')
+            ->assertJsonPath('data.status', KbDocument::STATUS_TRAINED);
+
+        $this->assertGreaterThanOrEqual(2, $res->json('data.chunk_count')); // one section per table
+        $this->assertStringContainsString('customers', $kb->chunks()->first()->content);
+    }
+
+    public function test_ingests_rbac_as_system_knowledge(): void
+    {
+        $this->actingWithPermissions(['kb.manage']);
+        $kb = \App\Models\KnowledgeBase::create(['name' => 'System', 'version' => 1]);
+
+        $this->postJson("/api/knowledge-bases/{$kb->id}/system", ['source' => 'rbac'])
+            ->assertCreated()
+            ->assertJsonPath('data.category', 'rbac')
+            ->assertJsonPath('data.source_kind', 'system');
+
+        // The acting user's test-role + its permission appear in the RBAC text.
+        $chunk = $kb->chunks()->first();
+        $this->assertStringContainsString('Role:', (string) $chunk->heading);
+        $this->assertStringContainsString('kb.manage', $chunk->content);
+    }
+
     public function test_rejects_unsupported_file_type(): void
     {
         Storage::fake('local');

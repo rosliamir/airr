@@ -110,6 +110,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('knowledge-bases/{knowledgeBase}', [KnowledgeBaseController::class, 'update']);
         Route::delete('knowledge-bases/{knowledgeBase}', [KnowledgeBaseController::class, 'destroy']);
         Route::post('knowledge-bases/{knowledgeBase}/documents', [KbDocumentController::class, 'store']);
+        Route::post('knowledge-bases/{knowledgeBase}/system', [KbDocumentController::class, 'ingestSystem']);
         Route::post('kb-documents/{kbDocument}/reindex', [KbDocumentController::class, 'reindex']);
         Route::delete('kb-documents/{kbDocument}', [KbDocumentController::class, 'destroy']);
     });

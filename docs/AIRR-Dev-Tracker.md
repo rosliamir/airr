@@ -88,8 +88,8 @@
 | [x] | FR-M3.1 | "Train the Database" UI — KB CRUD + upload reference docs (KnowledgeBaseView) | ✅ | 2026-06-25 | |
 | [x] | FR-M3.2 | Ingest PDF / DOCX / XLSX / Markdown auto (DocumentExtractor) | ✅ | 2026-06-25 | |
 | [x] | FR-M3.2a | **Document category taxonomy** — URS/SRS/SDS/Test Script/UAT/User Manual/Helpdesk/Other (config/kb.php), dipilih masa upload + papar dalam KB | ✅ | 2026-06-25 | |
-| [ ] | FR-M3.2b | **System-knowledge ingest** — DB schema/ERD/data-dictionary/glossary/business-logic/UI/menu/RBAC/API → teks deskriptif → chunk → embed (introspect dari AIRR) | ⬜ | | |
-| [ ] | FR-M3.2c | **Help Desk integration** — connector Generic REST (base URL+auth) tarik tiket → KB (source_kind=integration) + UI | ⬜ | | |
+| [x] | FR-M3.2b | **System-knowledge ingest** — pipeline siap (SystemKnowledgeService + ingestText); **DB Schema + RBAC** done. Baki (ERD/data-dictionary/glossary/business-logic/UI/menu/API) tambah berperingkat | ✅🟡 | 2026-06-25 | |
+| [ ] | FR-M3.2c | **Help Desk integration** — connector Generic REST (base URL+auth) tarik tiket → KB (source_kind=integration) + UI | 🔒 KIV→Fasa 3 | | |
 | [x] | FR-M3.3 | Structure-aware chunking (ChunkerService — heading/paragraph, bukan fixed count) | ✅ | 2026-06-25 | |
 | [ ] | FR-M3.4 | Tukar flowchart/diagram/table → descriptive text sebelum embed | ⬜ | | |
 | [ ] | FR-M3.5 | Embeddings via pgai → simpan pgvector (HNSW) | ⬜ | | |

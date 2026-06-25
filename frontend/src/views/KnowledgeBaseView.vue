@@ -42,6 +42,13 @@ const categories = ref<Record<string, string>>({})
 const uploadCategory = ref('srs')
 const uploadOtherLabel = ref('')
 
+// System-knowledge ingest (FR-M3.2b).
+const systemSources = ref<Record<string, string>>({})
+const dataSources = ref<{ id: number; name: string }[]>([])
+const sysSource = ref('db_schema')
+const sysDataSourceId = ref<number | null>(null)
+const ingestingSystem = ref(false)
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -53,7 +60,12 @@ async function load() {
     kbs.value = k.data
     projects.value = p.data
     if (!Object.keys(categories.value).length) {
-      categories.value = (await apiRequest<{ data: { documents: Record<string, string> } }>('/knowledge-bases/categories')).data.documents
+      const meta = (await apiRequest<{ data: { documents: Record<string, string>; system: Record<string, string> } }>('/knowledge-bases/categories')).data
+      categories.value = meta.documents
+      systemSources.value = meta.system
+    }
+    if (auth.can('datasources.view') && !dataSources.value.length) {
+      dataSources.value = (await apiRequest<{ data: { id: number; name: string }[] }>('/data-sources')).data
     }
   } catch (e) {
     error.value = e instanceof ApiException ? e.error.message : 'Failed to load knowledge bases'
@@ -127,6 +139,23 @@ async function onUpload(e: Event) {
   } finally {
     uploading.value = false
     input.value = ''
+  }
+}
+
+async function ingestSystem() {
+  if (!selected.value) return
+  ingestingSystem.value = true
+  error.value = ''
+  try {
+    const body: Record<string, unknown> = { source: sysSource.value }
+    if (sysSource.value === 'db_schema') body.data_source_id = sysDataSourceId.value
+    await apiRequest(`/knowledge-bases/${selected.value.id}/system`, { method: 'POST', body: JSON.stringify(body) })
+    await openDetail(selected.value)
+    await load()
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'System ingest failed'
+  } finally {
+    ingestingSystem.value = false
   }
 }
 
@@ -226,6 +255,34 @@ onMounted(load)
               <input type="file" accept=".pdf,.docx,.xlsx,.xls,.md,.markdown,.txt" :disabled="uploading" @change="onUpload"
                 class="text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-airr-50 file:text-airr-700 file:px-3 file:py-1.5 file:text-sm" />
               <p class="text-xs text-slate-400">{{ uploading ? 'Ingesting…' : 'PDF, DOCX, XLSX, Markdown — auto-chunked.' }}</p>
+            </div>
+
+            <!-- System knowledge (FR-M3.2b) -->
+            <div v-if="canManage" class="border border-dashed border-slate-200 rounded-lg p-4 space-y-3">
+              <div>
+                <label class="block text-sm font-medium text-slate-600">Add system knowledge</label>
+                <p class="text-xs text-slate-400">Ingest AIRR's own structure (DB schema, RBAC…) as descriptive text.</p>
+              </div>
+              <div class="flex flex-wrap items-end gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-slate-500 mb-1">Source</label>
+                  <select v-model="sysSource" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:ring-2 focus:ring-airr-300 outline-none">
+                    <option v-for="(label, key) in systemSources" :key="key" :value="key">{{ label }}</option>
+                  </select>
+                </div>
+                <div v-if="sysSource === 'db_schema'">
+                  <label class="block text-xs font-medium text-slate-500 mb-1">Data source</label>
+                  <select v-model="sysDataSourceId" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:ring-2 focus:ring-airr-300 outline-none">
+                    <option :value="null">— select —</option>
+                    <option v-for="d in dataSources" :key="d.id" :value="d.id">{{ d.name }}</option>
+                  </select>
+                </div>
+                <button @click="ingestSystem" :disabled="ingestingSystem || (sysSource === 'db_schema' && !sysDataSourceId)"
+                  class="text-sm font-medium text-airr-600 border border-airr-200 hover:bg-airr-50 rounded-lg px-3 py-1.5 disabled:opacity-50">
+                  {{ ingestingSystem ? 'Ingesting…' : 'Ingest' }}
+                </button>
+              </div>
+              <p class="text-[11px] text-slate-400">More sources (ERD, menu, glossary…) coming. Some are gated until Ollama embedding is set up.</p>
             </div>
 
             <!-- Documents -->
