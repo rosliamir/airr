@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 // M6 (FR-M6.1) — report definition. `definition` holds the portable JSON the
 // renderer executes and the Studio edits.
@@ -38,12 +39,53 @@ class Report extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
-    // Owner+project visibility (FR-M14.3), mirrors data sources / KB.
-    public function scopeVisibleTo($query, User $viewer)
+    // Per-report ACL (FR-M6 ACL): roles granted abilities on this report.
+    public function roles(): BelongsToMany
     {
-        return $query->where(function ($q) use ($viewer) {
+        return $this->belongsToMany(Role::class)
+            ->withPivot(['can_view', 'can_edit', 'can_run'])
+            ->withTimestamps();
+    }
+
+    /**
+     * Reports a non-admin may see: ones they created, or where a role they hold
+     * is granted can_view. (A report with no ACL is private to its creator.)
+     */
+    public function scopeAccessibleTo($query, User $viewer)
+    {
+        $roleIds = $viewer->roles()->pluck('roles.id')->all();
+
+        return $query->where(function ($q) use ($viewer, $roleIds) {
             $q->where('created_by', $viewer->id)
-                ->orWhereHas('project', fn ($p) => $p->visibleTo($viewer));
+                ->orWhereHas('roles', fn ($r) => $r->whereIn('roles.id', $roleIds)->where('report_role.can_view', true));
         });
+    }
+
+    /** May $user perform $ability ('view'|'edit'|'run') on this report? */
+    public function allows(User $user, string $ability): bool
+    {
+        if ($user->seesEverything() || $this->created_by === $user->id) {
+            return true;
+        }
+        $roleIds = $user->roles()->pluck('roles.id')->all();
+
+        return $this->roles()
+            ->whereIn('roles.id', $roleIds)
+            ->wherePivot("can_{$ability}", true)
+            ->exists();
+    }
+
+    /**
+     * Replace the report's ACL. $grants = [['role_id'=>.., 'view'=>bool, 'edit'=>bool, 'run'=>bool], ...]
+     */
+    public function syncPermissions(array $grants): void
+    {
+        $this->roles()->sync(collect($grants)->mapWithKeys(fn ($g) => [
+            $g['role_id'] => [
+                'can_view' => (bool) ($g['view'] ?? true),
+                'can_edit' => (bool) ($g['edit'] ?? false),
+                'can_run'  => (bool) ($g['run'] ?? true),
+            ],
+        ])->all());
     }
 }

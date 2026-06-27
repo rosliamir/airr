@@ -5,9 +5,11 @@ import { apiRequest, ApiException } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 type Ref2 = { id: number; name: string; code?: string }
+type Grant = { role_id: number; name?: string; view: boolean; edit: boolean; run: boolean }
 type Report = {
   id: number; name: string; description?: string; type: string; status: string
   project?: Ref2 | null; dataset?: Ref2 | null; definition?: Record<string, unknown>
+  permissions?: Grant[]
 }
 
 const auth = useAuthStore()
@@ -19,6 +21,8 @@ const TYPES = ['table', 'grouped', 'kpi', 'matrix', 'chart', 'document']
 
 const reports = ref<Report[]>([])
 const datasets = ref<Ref2[]>([])
+const roles = ref<{ id: number; name: string }[]>([])
+const perms = ref<Record<number, { view: boolean; edit: boolean; run: boolean }>>({})
 const selected = ref<Report | null>(null)
 const defText = ref('')          // JSON definition editor
 const preview = ref('')          // rendered HTML
@@ -35,6 +39,9 @@ async function load() {
   error.value = ''
   try {
     reports.value = (await apiRequest<{ data: Report[] }>('/reports')).data
+    if (!roles.value.length) {
+      roles.value = (await apiRequest<{ data: { id: number; name: string }[] }>('/roles/options')).data
+    }
     if (auth.can('datasources.view') && !datasets.value.length) {
       const ds = await apiRequest<{ data: { id: number; datasets_count: number }[] }>('/data-sources')
       // flatten datasets from each source
@@ -58,6 +65,10 @@ async function openReport(r: Report) {
   try {
     selected.value = (await apiRequest<{ data: Report }>(`/reports/${r.id}`)).data
     defText.value = JSON.stringify(selected.value.definition ?? {}, null, 2)
+    // Seed the role grant matrix from the report's ACL.
+    const map: Record<number, { view: boolean; edit: boolean; run: boolean }> = {}
+    for (const g of selected.value.permissions ?? []) map[g.role_id] = { view: g.view, edit: g.edit, run: g.run }
+    perms.value = map
   } catch (e) {
     error.value = e instanceof ApiException ? e.error.message : 'Failed to open report'
   }
@@ -88,9 +99,12 @@ async function saveDefinition() {
   try {
     let definition: unknown
     try { definition = JSON.parse(defText.value) } catch { throw new Error('Definition is not valid JSON') }
+    const permissions = Object.entries(perms.value)
+      .filter(([, v]) => v.view || v.edit || v.run)
+      .map(([role_id, v]) => ({ role_id: Number(role_id), ...v }))
     const r = await apiRequest<{ data: Report }>(`/reports/${selected.value.id}`, {
       method: 'PUT',
-      body: JSON.stringify({ name: selected.value.name, type: (definition as { type?: string }).type ?? selected.value.type, definition }),
+      body: JSON.stringify({ name: selected.value.name, type: (definition as { type?: string }).type ?? selected.value.type, definition, permissions }),
     })
     selected.value = r.data
     await load()
@@ -99,6 +113,14 @@ async function saveDefinition() {
   } finally {
     busy.value = false
   }
+}
+
+function grant(roleId: number) {
+  return perms.value[roleId] ?? { view: false, edit: false, run: false }
+}
+function toggleGrant(roleId: number, field: 'view' | 'edit' | 'run') {
+  const cur = grant(roleId)
+  perms.value = { ...perms.value, [roleId]: { ...cur, [field]: !cur[field] } }
 }
 
 async function run() {
@@ -181,8 +203,33 @@ onMounted(load)
                 <label class="block text-xs font-medium text-slate-500 mb-1">Definition (JSON)</label>
                 <textarea v-model="defText" rows="10" spellcheck="false"
                   class="w-full font-mono text-xs rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none"></textarea>
-                <button @click="saveDefinition" :disabled="busy" class="mt-2 text-sm font-medium text-airr-600 border border-airr-200 hover:bg-airr-50 rounded-lg px-3 py-1.5">Save definition</button>
               </div>
+
+              <!-- Per-report access (FR-M6 ACL) -->
+              <div v-if="canEdit && roles.length" class="border-t border-slate-100 pt-3">
+                <label class="block text-xs font-medium text-slate-500 mb-2">Access — which roles can use this report</label>
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="text-[11px] text-slate-400 text-left">
+                      <th class="font-medium py-1">Role</th>
+                      <th class="font-medium w-14 text-center">View</th>
+                      <th class="font-medium w-14 text-center">Run</th>
+                      <th class="font-medium w-14 text-center">Edit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="role in roles" :key="role.id" class="border-t border-slate-50">
+                      <td class="py-1.5 text-slate-600">{{ role.name }}</td>
+                      <td class="text-center"><input type="checkbox" :checked="grant(role.id).view" @change="toggleGrant(role.id, 'view')" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" /></td>
+                      <td class="text-center"><input type="checkbox" :checked="grant(role.id).run" @change="toggleGrant(role.id, 'run')" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" /></td>
+                      <td class="text-center"><input type="checkbox" :checked="grant(role.id).edit" @change="toggleGrant(role.id, 'edit')" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" /></td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p class="text-[11px] text-slate-400 mt-1.5">No roles ticked = private to you (creator) and admins.</p>
+              </div>
+
+              <button @click="saveDefinition" :disabled="busy" class="mt-3 text-sm font-medium text-airr-600 border border-airr-200 hover:bg-airr-50 rounded-lg px-3 py-1.5">Save definition &amp; access</button>
             </div>
 
             <div v-if="preview" class="bg-white rounded-xl border border-slate-100 p-5">

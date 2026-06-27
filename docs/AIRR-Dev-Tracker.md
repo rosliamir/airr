@@ -68,6 +68,7 @@
 | [x] | FR-M6.3 | Grouping + subtotal/grand total (single-level done; multi-level + running/percent baki) | ✅🟡 | 2026-06-27 | |
 | [x] | FR-M6.4 | Conditional formatting (rule field op value → warna; ikon/data-bar baki) | ✅🟡 | 2026-06-27 | |
 | [ ] | FR-M6.5 | Prompt runtime params (date picker, dropdown) — Slice 3 | ⬜ | | |
+| [x] | FR-M6.6 | **Per-report ACL** — grant roles view/edit/run per report (private-by-default to creator+admin); enforced in controller (report_role) | ✅ | 2026-06-27 | |
 
 ### M10 — Output & Export
 | ✓ | FR | Requirement | Status | Tarikh | Masa |

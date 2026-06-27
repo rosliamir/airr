@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\Dataset;
 use App\Models\DataSource;
 use App\Models\Report;
+use App\Models\Role;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -50,7 +52,8 @@ class ReportTest extends TestCase
         $dataset = Dataset::create(['data_source_id' => $ds->id, 'name' => 'sales']);
 
         return Report::create([
-            'name' => 'Report', 'type' => $definition['type'], 'dataset_id' => $dataset->id, 'definition' => $definition,
+            'name' => 'Report', 'type' => $definition['type'], 'dataset_id' => $dataset->id,
+            'definition' => $definition, 'created_by' => auth()->id(),
         ]);
     }
 
@@ -83,6 +86,63 @@ class ReportTest extends TestCase
         $html = $this->postJson("/api/reports/{$report->id}/run")->assertOk()->json('data.html');
         $this->assertStringContainsString('Region: North', $html);
         $this->assertStringContainsString('Grand total', $html);
+    }
+
+    // --- Per-report ACL (FR-M6 ACL) ---
+
+    public function test_report_without_grant_is_private_to_creator(): void
+    {
+        $owner = User::factory()->create(['user_type' => User::TYPE_USER]);
+        $report = Report::create(['name' => 'Secret', 'type' => 'table', 'created_by' => $owner->id]);
+
+        $this->actingWithPermissions(['reports.view', 'reports.run']); // a different, non-admin user
+        $this->getJson('/api/reports')->assertOk()->assertJsonCount(0, 'data');
+        $this->getJson("/api/reports/{$report->id}")->assertForbidden();
+    }
+
+    public function test_role_grant_gives_view_access(): void
+    {
+        $owner = User::factory()->create(['user_type' => User::TYPE_USER]);
+        $report = Report::create(['name' => 'Shared', 'type' => 'table', 'created_by' => $owner->id]);
+
+        $viewer = $this->actingWithPermissions(['reports.view']);
+        $report->syncPermissions([['role_id' => $viewer->roles()->first()->id, 'view' => true, 'run' => true]]);
+
+        $this->getJson('/api/reports')->assertOk()->assertJsonCount(1, 'data');
+        $this->getJson("/api/reports/{$report->id}")->assertOk();
+    }
+
+    public function test_run_requires_can_run_grant(): void
+    {
+        $owner = User::factory()->create(['user_type' => User::TYPE_USER]);
+        $report = Report::create(['name' => 'NoRun', 'type' => 'table', 'created_by' => $owner->id]);
+
+        $viewer = $this->actingWithPermissions(['reports.view', 'reports.run']);
+        $report->syncPermissions([['role_id' => $viewer->roles()->first()->id, 'view' => true, 'run' => false]]);
+
+        $this->postJson("/api/reports/{$report->id}/run")->assertForbidden();
+    }
+
+    public function test_creator_keeps_full_access(): void
+    {
+        $creator = $this->actingWithPermissions(['reports.view', 'reports.edit']);
+        $report = Report::create(['name' => 'Mine', 'type' => 'table', 'created_by' => $creator->id]);
+
+        $this->getJson("/api/reports/{$report->id}")->assertOk();
+        $this->putJson("/api/reports/{$report->id}", ['name' => 'Mine 2'])->assertOk();
+    }
+
+    public function test_store_persists_acl_grants(): void
+    {
+        $this->actingWithPermissions(['reports.create']);
+        $role = Role::create(['slug' => 'analyst', 'name' => 'Analyst', 'clearance' => 5]);
+
+        $this->postJson('/api/reports', [
+            'name' => 'R', 'type' => 'table',
+            'permissions' => [['role_id' => $role->id, 'view' => true, 'edit' => true, 'run' => true]],
+        ])->assertCreated();
+
+        $this->assertDatabaseHas('report_role', ['role_id' => $role->id, 'can_edit' => true]);
     }
 
     public function test_runs_kpi_report(): void

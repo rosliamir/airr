@@ -64,6 +64,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('menus/{menu}', [MenuController::class, 'destroy']);
     });
 
+    // Role picker options (any authenticated user — e.g. per-report ACL UI)
+    Route::get('roles/options', [RoleController::class, 'options']);
+
     // M14 — role administration (gated by roles.manage)
     Route::middleware('permission:roles.manage')->group(function () {
         Route::get('roles', [RoleController::class, 'index']);

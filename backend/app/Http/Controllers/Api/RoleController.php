@@ -31,6 +31,14 @@ class RoleController extends Controller
         return $this->sendOk($roles);
     }
 
+    // Lightweight id/name list for pickers (e.g. per-report ACL). Auth-only.
+    public function options(): JsonResponse
+    {
+        return $this->sendOk(
+            Role::orderByDesc('clearance')->get(['id', 'slug', 'name'])
+        );
+    }
+
     public function store(Request $request): JsonResponse
     {
         $data = $this->validateRole($request);

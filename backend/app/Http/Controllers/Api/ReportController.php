@@ -28,6 +28,7 @@ class ReportController extends Controller
     // render deterministic HTML. reports.run.
     public function run(Request $request, Report $report): JsonResponse
     {
+        $this->authorizeReport($request, $report, 'run');
         $params = (array) $request->input('params', []);
 
         $data = ['columns' => [], 'rows' => []];
@@ -52,7 +53,7 @@ class ReportController extends Controller
 
         $viewer = $request->user();
         if (! $viewer->seesEverything()) {
-            $query->visibleTo($viewer);
+            $query->accessibleTo($viewer); // per-report ACL (FR-M6 ACL)
         }
         if ($pid = $request->input('project_id')) {
             $query->where('project_id', $pid);
@@ -61,39 +62,57 @@ class ReportController extends Controller
         return $this->sendOk($query->orderByDesc('updated_at')->get()->map(fn ($r) => $this->row($r)));
     }
 
-    public function show(Report $report): JsonResponse
+    public function show(Request $request, Report $report): JsonResponse
     {
-        return $this->sendOk($this->row($report->load(['project:id,code,name', 'dataset:id,name']), true));
+        $this->authorizeReport($request, $report, 'view');
+
+        return $this->sendOk($this->row($report->load(['project:id,code,name', 'dataset:id,name', 'roles:id,slug,name']), true));
     }
 
     public function store(Request $request): JsonResponse
     {
         $data = $this->validateReport($request);
         $report = Report::create([
-            ...$data,
+            ...collect($data)->except('permissions')->all(),
             'definition' => $data['definition'] ?? $this->blankDefinition($data['type'] ?? 'table'),
             'created_by' => $request->user()->id,
         ]);
+        $report->syncPermissions($data['permissions'] ?? []);
         $this->audit->log('report.created', Report::class, $report->id, null, ['name' => $report->name]);
 
-        return $this->sendCreated($this->row($report->fresh(['project', 'dataset'])));
+        return $this->sendCreated($this->row($report->fresh(['project', 'dataset', 'roles'])));
     }
 
     public function update(Request $request, Report $report): JsonResponse
     {
+        $this->authorizeReport($request, $report, 'edit');
         $data = $this->validateReport($request, $report);
-        $report->update($data);
+        $report->update(collect($data)->except('permissions')->all());
+        if (array_key_exists('permissions', $data)) {
+            $report->syncPermissions($data['permissions'] ?? []);
+        }
         $this->audit->log('report.updated', Report::class, $report->id);
 
-        return $this->sendOk($this->row($report->fresh(['project', 'dataset']), true));
+        return $this->sendOk($this->row($report->fresh(['project', 'dataset', 'roles']), true));
     }
 
-    public function destroy(Report $report): JsonResponse
+    public function destroy(Request $request, Report $report): JsonResponse
     {
+        $this->authorizeReport($request, $report, 'edit');
         $report->delete();
         $this->audit->log('report.deleted', Report::class, $report->id);
 
         return $this->sendNoContent();
+    }
+
+    // Per-report ACL gate (FR-M6 ACL) — abort 403 if the user lacks the ability.
+    private function authorizeReport(Request $request, Report $report, string $ability): void
+    {
+        if (! $report->allows($request->user(), $ability)) {
+            abort(response()->json([
+                'error' => ['code' => 'FORBIDDEN', 'message' => "You do not have {$ability} access to this report."],
+            ], 403));
+        }
     }
 
     private function validateReport(Request $request, ?Report $report = null): array
@@ -116,6 +135,12 @@ class ReportController extends Controller
             'definition.sorts'       => 'nullable|array',
             'definition.params'      => 'nullable|array',
             'definition.conditional' => 'nullable|array',
+            // Per-report ACL grants (FR-M6 ACL).
+            'permissions'           => 'nullable|array',
+            'permissions.*.role_id' => 'required_with:permissions|integer|exists:roles,id',
+            'permissions.*.view'    => 'nullable|boolean',
+            'permissions.*.edit'    => 'nullable|boolean',
+            'permissions.*.run'     => 'nullable|boolean',
         ]);
     }
 
@@ -136,6 +161,15 @@ class ReportController extends Controller
             'dataset'     => $r->dataset ? ['id' => $r->dataset->id, 'name' => $r->dataset->name] : null,
             'creator'     => $r->creator ? ['id' => $r->creator->id, 'name' => $r->creator->name] : null,
             'definition'  => $withDefinition ? ($r->definition ?? []) : null,
+            'permissions' => $withDefinition && $r->relationLoaded('roles')
+                ? $r->roles->map(fn ($role) => [
+                    'role_id' => $role->id,
+                    'name'    => $role->name,
+                    'view'    => (bool) $role->pivot->can_view,
+                    'edit'    => (bool) $role->pivot->can_edit,
+                    'run'     => (bool) $role->pivot->can_run,
+                ])->values()
+                : null,
             'updated_at'  => $r->updated_at,
         ], fn ($v) => $v !== null);
     }
