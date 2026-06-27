@@ -81,6 +81,8 @@ onMounted(async () => {
       const note = (n: NavNode) => { if (n.route && n.auto_collapse) collapseSet.add(n.route) }
       tree.forEach((n) => { note(n); (n.children ?? []).forEach(note) })
       autoCollapseRoutes.value = collapseSet
+      // Apply immediately if we loaded straight onto an auto-collapse route.
+      if (route.name && collapseSet.has(String(route.name))) collapsed.value = true
       apiGroups.value = tree.map((n) =>
         n.route
           ? { title: null, items: [{ label: n.label, route: n.route, icon: n.icon }] }
@@ -100,13 +102,24 @@ async function logout() {
   <div class="min-h-screen flex bg-slate-50">
     <!-- Sidebar -->
     <aside class="shrink-0 bg-white border-r border-slate-200 flex flex-col transition-all duration-200" :class="collapsed ? 'w-16' : 'w-64'">
-      <div class="h-16 flex items-center border-b border-slate-100" :class="collapsed ? 'justify-center px-0' : 'gap-2.5 px-5'">
-        <AirrLogo :size="30" />
-        <div v-if="!collapsed">
-          <div class="font-bold leading-none">AIRR</div>
-          <div class="text-[9px] text-slate-400 uppercase tracking-widest">Studio</div>
+      <div class="h-16 flex items-center border-b border-slate-100" :class="collapsed ? 'justify-center px-0' : 'justify-between pl-5 pr-2'">
+        <div class="flex items-center gap-2.5">
+          <AirrLogo :size="30" />
+          <div v-if="!collapsed">
+            <div class="font-bold leading-none">AIRR</div>
+            <div class="text-[9px] text-slate-400 uppercase tracking-widest">Studio</div>
+          </div>
         </div>
+        <button v-if="!collapsed" @click="toggleCollapsed" title="Collapse"
+          class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100">
+          <component :is="icons.PanelLeftClose" :size="18" />
+        </button>
       </div>
+      <!-- Expand button (when collapsed) -->
+      <button v-if="collapsed" @click="toggleCollapsed" title="Expand"
+        class="h-9 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-50 border-b border-slate-100">
+        <component :is="icons.PanelLeftOpen" :size="18" />
+      </button>
 
       <nav class="flex-1 overflow-y-auto py-3 px-2 space-y-4">
         <div v-for="(group, gi) in groups" :key="gi">
@@ -129,13 +142,6 @@ async function logout() {
         </div>
       </nav>
 
-      <!-- Collapse toggle -->
-      <button @click="toggleCollapsed" :title="collapsed ? 'Expand' : 'Collapse'"
-        class="h-10 border-t border-slate-100 flex items-center text-slate-400 hover:text-slate-600 hover:bg-slate-50"
-        :class="collapsed ? 'justify-center' : 'justify-end px-4 gap-1.5'">
-        <span v-if="!collapsed" class="text-xs">Collapse</span>
-        <component :is="collapsed ? icons.PanelLeftOpen : icons.PanelLeftClose" :size="17" />
-      </button>
     </aside>
 
     <!-- Main -->

@@ -105,7 +105,7 @@ class MenuController extends Controller
             'permission' => 'nullable|string|max:60',
             'feature'    => 'nullable|string|max:60',
             'user_types'   => 'nullable|array',
-            'user_types.*' => ['string', \Illuminate\Validation\Rule::in(\App\Models\User::USER_TYPES)],
+            'user_types.*' => 'string|max:40', // values come from the user_type lookup
             'sort'         => 'nullable|integer',
             'is_active'    => 'nullable|boolean',
             'auto_collapse' => 'nullable|boolean',

@@ -43,6 +43,7 @@ const canManage = auth.can('projects.manage')
 
 const projects = ref<Project[]>([])
 const allUsers = ref<Member[]>([])
+const projectTypes = ref<{ value: string; label: string }[]>([])
 const loading = ref(true)
 const error = ref('')
 const busy = ref(false)
@@ -96,6 +97,9 @@ async function load() {
     ]
     projects.value = p.data
     allUsers.value = u?.data ?? []
+    if (!projectTypes.value.length) {
+      projectTypes.value = (await apiRequest<{ data: { value: string; label: string }[] }>('/lookups?category=project_type')).data
+    }
   } catch (e) {
     error.value = e instanceof ApiException ? e.error.message : 'Failed to load projects'
   } finally {
@@ -255,7 +259,10 @@ onMounted(() => {
         <div class="grid grid-cols-4 gap-3">
           <div>
             <label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
-            <input v-model="form.type" placeholder="development" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
+            <select v-model="form.type" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none">
+              <option value="">— select —</option>
+              <option v-for="t in projectTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
+            </select>
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-600 mb-1">Status</label>

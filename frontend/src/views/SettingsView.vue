@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import AdminLayout from '../layouts/AdminLayout.vue'
 import { apiRequest, ApiException } from '../api/client'
 
@@ -22,14 +22,59 @@ type AiConfig = {
 }
 type AiHealth = { provider: string; reachable: boolean; models: { name: string }[] }
 
-const tab = ref<'regional' | 'access' | 'ai' | 'subscription' | 'about'>('regional')
+const tab = ref<'regional' | 'lookup' | 'ai' | 'subscription' | 'about'>('regional')
 
-// User types reference (used for menu access gating). Fixed enum.
-const USER_TYPES = [
-  { value: 'system_admin', label: 'System Administrator', desc: 'Platform owner — unrestricted; sees every module & menu.' },
-  { value: 'admin', label: 'Administrator', desc: 'Full operational access across modules.' },
-  { value: 'user', label: 'User', desc: 'Standard user — access scoped by roles, permissions & menu user-type gating.' },
-]
+// --- Lookups (M14): reference values that feed dropdowns (user_type, project_type, …) ---
+type Lookup = { id: number; category: string; value: string; label: string; sort: number; is_active: boolean; is_system: boolean }
+const lookups = ref<Record<string, Lookup[]>>({})
+const lookupBusy = ref(false)
+const showLookupForm = ref(false)
+const editingLookup = ref<Lookup | null>(null)
+const lookupForm = ref<{ category: string; value: string; label: string; sort: number; is_active: boolean }>({ category: '', value: '', label: '', sort: 0, is_active: true })
+const lookupCategories = computed(() => Object.keys(lookups.value))
+
+async function loadLookups() {
+  try {
+    lookups.value = (await apiRequest<{ data: Record<string, Lookup[]> }>('/lookups/manage')).data
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Failed to load lookups'
+  }
+}
+function openLookupCreate(category = '') {
+  editingLookup.value = null
+  lookupForm.value = { category, value: '', label: '', sort: 0, is_active: true }
+  showLookupForm.value = true
+}
+function openLookupEdit(l: Lookup) {
+  editingLookup.value = l
+  lookupForm.value = { category: l.category, value: l.value, label: l.label, sort: l.sort, is_active: l.is_active }
+  showLookupForm.value = true
+}
+async function saveLookup() {
+  lookupBusy.value = true
+  error.value = ''
+  try {
+    const path = editingLookup.value ? `/lookups/${editingLookup.value.id}` : '/lookups'
+    await apiRequest(path, { method: editingLookup.value ? 'PUT' : 'POST', body: JSON.stringify(lookupForm.value) })
+    showLookupForm.value = false
+    await loadLookups()
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Save failed'
+  } finally {
+    lookupBusy.value = false
+  }
+}
+async function deleteLookup(l: Lookup) {
+  if (l.is_system) return
+  if (!confirm(`Delete lookup "${l.label}"?`)) return
+  try {
+    await apiRequest(`/lookups/${l.id}`, { method: 'DELETE' })
+    await loadLookups()
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Delete failed'
+  }
+}
+const prettyCategory = (c: string) => c.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())
 const data = ref<Settings | null>(null)
 const loading = ref(true)
 const saving = ref(false)
@@ -146,6 +191,7 @@ const featureLabel = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/g, (c) =>
 onMounted(() => {
   load()
   loadAi()
+  loadLookups()
 })
 </script>
 
@@ -153,7 +199,7 @@ onMounted(() => {
   <AdminLayout>
     <div class="space-y-5">
       <div class="flex gap-6 border-b border-slate-200">
-        <button v-for="t in (['regional', 'access', 'ai', 'subscription', 'about'] as const)" :key="t" @click="tab = t"
+        <button v-for="t in (['regional', 'lookup', 'ai', 'subscription', 'about'] as const)" :key="t" @click="tab = t"
           class="pb-2.5 text-sm font-medium border-b-2 -mb-px transition capitalize"
           :class="tab === t ? 'border-airr-500 text-airr-600' : 'border-transparent text-slate-500 hover:text-slate-700'">
           {{ t === 'ai' ? 'AI / Models' : t }}
@@ -180,21 +226,38 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- ACCESS (user types) -->
-      <div v-else-if="tab === 'access'" class="bg-white rounded-xl border border-slate-100 p-6 max-w-2xl space-y-3">
-        <div>
-          <h3 class="font-semibold text-slate-700">User types</h3>
-          <p class="text-xs text-slate-400">Assigned per user. Menu items can be restricted to specific user types (Menu → Edit → User types with access).</p>
+      <!-- LOOKUP (reference values) -->
+      <div v-else-if="tab === 'lookup'" class="space-y-4 max-w-3xl">
+        <div class="flex items-center justify-between">
+          <p class="text-sm text-slate-400">Reference values that feed dropdowns (user types, project types, …). Add more lookups as needed.</p>
+          <button @click="openLookupCreate()" class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5">+ New value</button>
         </div>
-        <div class="divide-y divide-slate-50">
-          <div v-for="ut in USER_TYPES" :key="ut.value" class="py-3 flex items-start gap-3">
-            <span class="text-[10px] uppercase font-medium bg-slate-100 text-slate-500 rounded px-2 py-1 mt-0.5 whitespace-nowrap">{{ ut.value }}</span>
-            <div>
-              <div class="text-sm font-medium text-slate-700">{{ ut.label }}</div>
-              <div class="text-xs text-slate-500">{{ ut.desc }}</div>
-            </div>
+
+        <div v-for="(items, category) in lookups" :key="category" class="bg-white rounded-xl border border-slate-100 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold text-slate-700">{{ prettyCategory(category) }}</h3>
+            <button @click="openLookupCreate(category)" class="text-xs text-airr-600 hover:underline">+ Add to {{ prettyCategory(category) }}</button>
           </div>
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-xs text-slate-400 text-left">
+                <th class="font-medium py-1">Label</th><th class="font-medium">Value</th><th class="font-medium w-16">Active</th><th class="font-medium w-24 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="l in items" :key="l.id" class="border-t border-slate-50">
+                <td class="py-1.5 text-slate-700">{{ l.label }} <span v-if="l.is_system" class="text-[9px] uppercase text-slate-400 ml-1">system</span></td>
+                <td class="text-slate-500"><code class="text-xs">{{ l.value }}</code></td>
+                <td><span :class="l.is_active ? 'text-emerald-500' : 'text-slate-300'">{{ l.is_active ? '✓' : '✕' }}</span></td>
+                <td class="text-right whitespace-nowrap">
+                  <button @click="openLookupEdit(l)" class="text-xs text-airr-600 hover:underline mr-3">Edit</button>
+                  <button v-if="!l.is_system" @click="deleteLookup(l)" class="text-xs text-rose-500 hover:underline">Delete</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+        <div v-if="!lookupCategories.length" class="text-sm text-slate-400">No lookups yet.</div>
       </div>
 
       <!-- AI / MODELS -->
@@ -312,6 +375,42 @@ onMounted(() => {
             </dd>
           </div>
         </dl>
+      </div>
+    </div>
+
+    <!-- Lookup form modal -->
+    <div v-if="showLookupForm" class="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50" @click.self="showLookupForm = false">
+      <div class="bg-white rounded-xl p-6 w-full max-w-sm space-y-3">
+        <h2 class="font-semibold text-slate-800">{{ editingLookup ? 'Edit' : 'New' }} lookup value</h2>
+        <div>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Category</label>
+          <input v-model="lookupForm.category" list="lookup-cats" :disabled="!!editingLookup?.is_system"
+            placeholder="user_type" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-airr-300 outline-none disabled:bg-slate-50" />
+          <datalist id="lookup-cats"><option v-for="c in lookupCategories" :key="c" :value="c" /></datalist>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Value <span class="text-slate-300">(stable key)</span></label>
+          <input v-model="lookupForm.value" :disabled="!!editingLookup?.is_system"
+            placeholder="development" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-airr-300 outline-none disabled:bg-slate-50" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Label</label>
+          <input v-model="lookupForm.label" placeholder="Development" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
+        </div>
+        <div class="flex items-center gap-4">
+          <div class="w-24">
+            <label class="block text-xs font-medium text-slate-500 mb-1">Sort</label>
+            <input v-model.number="lookupForm.sort" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
+          </div>
+          <label class="flex items-center gap-2 text-sm text-slate-600 mt-5">
+            <input type="checkbox" v-model="lookupForm.is_active" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" /> Active
+          </label>
+        </div>
+        <div class="flex justify-end gap-2 pt-1">
+          <button @click="showLookupForm = false" class="text-sm text-slate-500 px-3 py-2">Cancel</button>
+          <button @click="saveLookup" :disabled="lookupBusy || !lookupForm.category || !lookupForm.value || !lookupForm.label"
+            class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-4 py-2 disabled:opacity-50">{{ lookupBusy ? 'Saving…' : 'Save' }}</button>
+        </div>
       </div>
     </div>
   </AdminLayout>

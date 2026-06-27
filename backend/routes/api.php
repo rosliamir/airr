@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\DataSourceController;
 use App\Http\Controllers\Api\FeatureController;
 use App\Http\Controllers\Api\KbDocumentController;
 use App\Http\Controllers\Api\KnowledgeBaseController;
+use App\Http\Controllers\Api\LookupController;
 use App\Http\Controllers\Api\MenuController;
 use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\ReportController;
@@ -74,6 +75,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('roles', [RoleController::class, 'store']);
         Route::put('roles/{role}', [RoleController::class, 'update']);
         Route::delete('roles/{role}', [RoleController::class, 'destroy']);
+    });
+
+    // M14 — lookups: read active values (any user, for dropdowns) + CRUD (admin)
+    Route::get('lookups', [LookupController::class, 'index']);
+    Route::middleware('permission:settings.manage')->group(function () {
+        Route::get('lookups/manage', [LookupController::class, 'manage']);
+        Route::post('lookups', [LookupController::class, 'store']);
+        Route::put('lookups/{lookup}', [LookupController::class, 'update']);
+        Route::delete('lookups/{lookup}', [LookupController::class, 'destroy']);
     });
 
     // M14 — global settings

@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             RbacSeeder::class,
             MenuSeeder::class,
+            LookupSeeder::class,
         ]);
     }
 }

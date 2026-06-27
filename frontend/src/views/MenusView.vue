@@ -9,11 +9,8 @@ type Menu = {
   feature: string | null; user_types: string[]; sort: number; is_active: boolean; auto_collapse: boolean
 }
 
-const USER_TYPES = [
-  { value: 'system_admin', label: 'System Admin' },
-  { value: 'admin', label: 'Admin' },
-  { value: 'user', label: 'User' },
-]
+// User types sourced from the lookup (Settings → Lookup), not hardcoded.
+const USER_TYPES = ref<{ value: string; label: string }[]>([])
 
 const menus = ref<Menu[]>([])
 const loading = ref(true)
@@ -52,6 +49,9 @@ async function load() {
   error.value = ''
   try {
     menus.value = (await apiRequest<{ data: Menu[] }>('/menus')).data
+    if (!USER_TYPES.value.length) {
+      USER_TYPES.value = (await apiRequest<{ data: { value: string; label: string }[] }>('/lookups?category=user_type')).data
+    }
   } catch (e) {
     error.value = e instanceof ApiException ? e.error.message : 'Failed to load menus'
   } finally {
