@@ -1,0 +1,452 @@
+[
+    {
+        "name": "Maybank Berhad",
+        "short": "Maybank",
+        "type": "Commercial",
+        "state": "Kuala Lumpur",
+        "branches": 20,
+        "assets_bil": 2.5,
+        "established": 1960
+    },
+    {
+        "name": "CIMB Berhad",
+        "short": "CIMB",
+        "type": "Development",
+        "state": "Sarawak",
+        "branches": 33,
+        "assets_bil": 11.75,
+        "established": 1971
+    },
+    {
+        "name": "Public Bank Berhad",
+        "short": "Public Bank",
+        "type": "Foreign",
+        "state": "Pahang",
+        "branches": 46,
+        "assets_bil": 21,
+        "established": 1982
+    },
+    {
+        "name": "RHB Berhad",
+        "short": "RHB",
+        "type": "Islamic",
+        "state": "Johor",
+        "branches": 59,
+        "assets_bil": 30.25,
+        "established": 1993
+    },
+    {
+        "name": "Hong Leong Berhad",
+        "short": "Hong Leong",
+        "type": "Investment",
+        "state": "Negeri Sembilan",
+        "branches": 72,
+        "assets_bil": 39.5,
+        "established": 2004
+    },
+    {
+        "name": "AmBank Berhad",
+        "short": "AmBank",
+        "type": "Commercial",
+        "state": "Selangor",
+        "branches": 85,
+        "assets_bil": 48.75,
+        "established": 2015
+    },
+    {
+        "name": "Bank Islam Berhad",
+        "short": "Bank Islam",
+        "type": "Development",
+        "state": "Perak",
+        "branches": 98,
+        "assets_bil": 58,
+        "established": 1966
+    },
+    {
+        "name": "Bank Rakyat Berhad",
+        "short": "Bank Rakyat",
+        "type": "Foreign",
+        "state": "Kelantan",
+        "branches": 111,
+        "assets_bil": 67.25,
+        "established": 1977
+    },
+    {
+        "name": "BSN Berhad",
+        "short": "BSN",
+        "type": "Islamic",
+        "state": "Sabah",
+        "branches": 124,
+        "assets_bil": 76.5,
+        "established": 1988
+    },
+    {
+        "name": "OCBC Berhad",
+        "short": "OCBC",
+        "type": "Investment",
+        "state": "Melaka",
+        "branches": 137,
+        "assets_bil": 85.75,
+        "established": 1999
+    },
+    {
+        "name": "HSBC Berhad",
+        "short": "HSBC",
+        "type": "Commercial",
+        "state": "Penang",
+        "branches": 150,
+        "assets_bil": 95,
+        "established": 2010
+    },
+    {
+        "name": "Standard Chartered Berhad",
+        "short": "Standard Chartered",
+        "type": "Development",
+        "state": "Kedah",
+        "branches": 163,
+        "assets_bil": 104.25,
+        "established": 1961
+    },
+    {
+        "name": "UOB Berhad",
+        "short": "UOB",
+        "type": "Foreign",
+        "state": "Kuala Lumpur",
+        "branches": 176,
+        "assets_bil": 113.5,
+        "established": 1972
+    },
+    {
+        "name": "Affin Bank Berhad",
+        "short": "Affin Bank",
+        "type": "Islamic",
+        "state": "Sarawak",
+        "branches": 189,
+        "assets_bil": 122.75,
+        "established": 1983
+    },
+    {
+        "name": "Alliance Bank Berhad",
+        "short": "Alliance Bank",
+        "type": "Investment",
+        "state": "Pahang",
+        "branches": 202,
+        "assets_bil": 132,
+        "established": 1994
+    },
+    {
+        "name": "MBSB Bank Berhad",
+        "short": "MBSB Bank",
+        "type": "Commercial",
+        "state": "Johor",
+        "branches": 215,
+        "assets_bil": 141.25,
+        "established": 2005
+    },
+    {
+        "name": "Agrobank Berhad",
+        "short": "Agrobank",
+        "type": "Development",
+        "state": "Negeri Sembilan",
+        "branches": 228,
+        "assets_bil": 150.5,
+        "established": 2016
+    },
+    {
+        "name": "Bank Muamalat Berhad",
+        "short": "Bank Muamalat",
+        "type": "Foreign",
+        "state": "Selangor",
+        "branches": 241,
+        "assets_bil": 9.75,
+        "established": 1967
+    },
+    {
+        "name": "Citibank Berhad",
+        "short": "Citibank",
+        "type": "Islamic",
+        "state": "Perak",
+        "branches": 254,
+        "assets_bil": 19,
+        "established": 1978
+    },
+    {
+        "name": "Bank of China Berhad",
+        "short": "Bank of China",
+        "type": "Investment",
+        "state": "Kelantan",
+        "branches": 267,
+        "assets_bil": 28.25,
+        "established": 1989
+    },
+    {
+        "name": "Maybank Islamic Berhad",
+        "short": "Maybank Islamic",
+        "type": "Commercial",
+        "state": "Sabah",
+        "branches": 280,
+        "assets_bil": 37.5,
+        "established": 2000
+    },
+    {
+        "name": "CIMB Islamic Berhad",
+        "short": "CIMB Islamic",
+        "type": "Development",
+        "state": "Melaka",
+        "branches": 293,
+        "assets_bil": 46.75,
+        "established": 2011
+    },
+    {
+        "name": "RHB Islamic Berhad",
+        "short": "RHB Islamic",
+        "type": "Foreign",
+        "state": "Penang",
+        "branches": 306,
+        "assets_bil": 56,
+        "established": 1962
+    },
+    {
+        "name": "Public Islamic Berhad",
+        "short": "Public Islamic",
+        "type": "Islamic",
+        "state": "Kedah",
+        "branches": 319,
+        "assets_bil": 65.25,
+        "established": 1973
+    },
+    {
+        "name": "Kuwait Finance House Berhad",
+        "short": "Kuwait Finance House",
+        "type": "Investment",
+        "state": "Kuala Lumpur",
+        "branches": 332,
+        "assets_bil": 74.5,
+        "established": 1984
+    },
+    {
+        "name": "Al Rajhi Berhad",
+        "short": "Al Rajhi",
+        "type": "Commercial",
+        "state": "Sarawak",
+        "branches": 345,
+        "assets_bil": 83.75,
+        "established": 1995
+    },
+    {
+        "name": "HSBC Amanah Berhad",
+        "short": "HSBC Amanah",
+        "type": "Development",
+        "state": "Pahang",
+        "branches": 358,
+        "assets_bil": 93,
+        "established": 2006
+    },
+    {
+        "name": "MIDF Berhad",
+        "short": "MIDF",
+        "type": "Foreign",
+        "state": "Johor",
+        "branches": 371,
+        "assets_bil": 102.25,
+        "established": 2017
+    },
+    {
+        "name": "Exim Bank Berhad",
+        "short": "Exim Bank",
+        "type": "Islamic",
+        "state": "Negeri Sembilan",
+        "branches": 384,
+        "assets_bil": 111.5,
+        "established": 1968
+    },
+    {
+        "name": "Bank Pembangunan Berhad",
+        "short": "Bank Pembangunan",
+        "type": "Investment",
+        "state": "Selangor",
+        "branches": 397,
+        "assets_bil": 120.75,
+        "established": 1979
+    },
+    {
+        "name": "Maybank Berhad Branch 2",
+        "short": "Maybank",
+        "type": "Commercial",
+        "state": "Perak",
+        "branches": 410,
+        "assets_bil": 130,
+        "established": 1990
+    },
+    {
+        "name": "CIMB Berhad Branch 2",
+        "short": "CIMB",
+        "type": "Development",
+        "state": "Kelantan",
+        "branches": 423,
+        "assets_bil": 139.25,
+        "established": 2001
+    },
+    {
+        "name": "Public Bank Berhad Branch 2",
+        "short": "Public Bank",
+        "type": "Foreign",
+        "state": "Sabah",
+        "branches": 436,
+        "assets_bil": 148.5,
+        "established": 2012
+    },
+    {
+        "name": "RHB Berhad Branch 2",
+        "short": "RHB",
+        "type": "Islamic",
+        "state": "Melaka",
+        "branches": 449,
+        "assets_bil": 7.75,
+        "established": 1963
+    },
+    {
+        "name": "Hong Leong Berhad Branch 2",
+        "short": "Hong Leong",
+        "type": "Investment",
+        "state": "Penang",
+        "branches": 462,
+        "assets_bil": 17,
+        "established": 1974
+    },
+    {
+        "name": "AmBank Berhad Branch 2",
+        "short": "AmBank",
+        "type": "Commercial",
+        "state": "Kedah",
+        "branches": 475,
+        "assets_bil": 26.25,
+        "established": 1985
+    },
+    {
+        "name": "Bank Islam Berhad Branch 2",
+        "short": "Bank Islam",
+        "type": "Development",
+        "state": "Kuala Lumpur",
+        "branches": 488,
+        "assets_bil": 35.5,
+        "established": 1996
+    },
+    {
+        "name": "Bank Rakyat Berhad Branch 2",
+        "short": "Bank Rakyat",
+        "type": "Foreign",
+        "state": "Sarawak",
+        "branches": 21,
+        "assets_bil": 44.75,
+        "established": 2007
+    },
+    {
+        "name": "BSN Berhad Branch 2",
+        "short": "BSN",
+        "type": "Islamic",
+        "state": "Pahang",
+        "branches": 34,
+        "assets_bil": 54,
+        "established": 2018
+    },
+    {
+        "name": "OCBC Berhad Branch 2",
+        "short": "OCBC",
+        "type": "Investment",
+        "state": "Johor",
+        "branches": 47,
+        "assets_bil": 63.25,
+        "established": 1969
+    },
+    {
+        "name": "HSBC Berhad Branch 2",
+        "short": "HSBC",
+        "type": "Commercial",
+        "state": "Negeri Sembilan",
+        "branches": 60,
+        "assets_bil": 72.5,
+        "established": 1980
+    },
+    {
+        "name": "Standard Chartered Berhad Branch 2",
+        "short": "Standard Chartered",
+        "type": "Development",
+        "state": "Selangor",
+        "branches": 73,
+        "assets_bil": 81.75,
+        "established": 1991
+    },
+    {
+        "name": "UOB Berhad Branch 2",
+        "short": "UOB",
+        "type": "Foreign",
+        "state": "Perak",
+        "branches": 86,
+        "assets_bil": 91,
+        "established": 2002
+    },
+    {
+        "name": "Affin Bank Berhad Branch 2",
+        "short": "Affin Bank",
+        "type": "Islamic",
+        "state": "Kelantan",
+        "branches": 99,
+        "assets_bil": 100.25,
+        "established": 2013
+    },
+    {
+        "name": "Alliance Bank Berhad Branch 2",
+        "short": "Alliance Bank",
+        "type": "Investment",
+        "state": "Sabah",
+        "branches": 112,
+        "assets_bil": 109.5,
+        "established": 1964
+    },
+    {
+        "name": "MBSB Bank Berhad Branch 2",
+        "short": "MBSB Bank",
+        "type": "Commercial",
+        "state": "Melaka",
+        "branches": 125,
+        "assets_bil": 118.75,
+        "established": 1975
+    },
+    {
+        "name": "Agrobank Berhad Branch 2",
+        "short": "Agrobank",
+        "type": "Development",
+        "state": "Penang",
+        "branches": 138,
+        "assets_bil": 128,
+        "established": 1986
+    },
+    {
+        "name": "Bank Muamalat Berhad Branch 2",
+        "short": "Bank Muamalat",
+        "type": "Foreign",
+        "state": "Kedah",
+        "branches": 151,
+        "assets_bil": 137.25,
+        "established": 1997
+    },
+    {
+        "name": "Citibank Berhad Branch 2",
+        "short": "Citibank",
+        "type": "Islamic",
+        "state": "Kuala Lumpur",
+        "branches": 164,
+        "assets_bil": 146.5,
+        "established": 2008
+    },
+    {
+        "name": "Bank of China Berhad Branch 2",
+        "short": "Bank of China",
+        "type": "Investment",
+        "state": "Sarawak",
+        "branches": 177,
+        "assets_bil": 5.75,
+        "established": 2019
+    }
+]
