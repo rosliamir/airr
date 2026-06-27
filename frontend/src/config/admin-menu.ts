@@ -27,7 +27,7 @@ export const adminMenu: MenuGroup[] = [
   {
     title: 'Author',
     items: [
-      { label: 'Reports', route: 'reports', icon: 'FileText', module: 'M6', permission: 'reports.view', phase: 1, ready: false },
+      { label: 'Reports', route: 'reports', icon: 'FileText', module: 'M6', permission: 'reports.view', phase: 1, ready: true },
       { label: 'Templates', route: 'templates', icon: 'LayoutTemplate', module: 'M6', permission: 'reports.create', phase: 1, ready: false },
     ],
   },

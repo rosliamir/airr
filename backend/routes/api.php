@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\DataSourceController;
 use App\Http\Controllers\Api\KbDocumentController;
 use App\Http\Controllers\Api\KnowledgeBaseController;
 use App\Http\Controllers\Api\ProjectController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\SystemController;
@@ -115,6 +116,20 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('kb-documents/{kbDocument}/versions', [KbDocumentController::class, 'addVersion']);
         Route::post('kb-documents/{kbDocument}/reindex', [KbDocumentController::class, 'reindex']);
         Route::delete('kb-documents/{kbDocument}', [KbDocumentController::class, 'destroy']);
+    });
+
+    // M6 — Report definitions + render engine
+    Route::middleware('permission:reports.view')->group(function () {
+        Route::get('reports', [ReportController::class, 'index']);
+        Route::get('reports/{report}', [ReportController::class, 'show']);
+    });
+    Route::post('reports/{report}/run', [ReportController::class, 'run'])->middleware('permission:reports.run');
+    Route::middleware('permission:reports.create')->group(function () {
+        Route::post('reports', [ReportController::class, 'store']);
+    });
+    Route::middleware('permission:reports.edit')->group(function () {
+        Route::put('reports/{report}', [ReportController::class, 'update']);
+        Route::delete('reports/{report}', [ReportController::class, 'destroy']);
     });
 
     // M14 — projects (reports are stored by project)

@@ -63,11 +63,11 @@
 ### M6 — Report Engine & Definition
 | ✓ | FR | Requirement | Status | Tarikh | Masa |
 |---|---|---|---|---|---|
-| [ ] | FR-M6.1 | Report = JSON definition portable (fields/groups/filters/sorts/aggregates/AI hints) | ⬜ | | |
-| [ ] | FR-M6.2 | Render: list, grouped (above/left), matrix/pivot, KPI, chart, drill-down, doc-style, AI output | ⬜ | | |
-| [ ] | FR-M6.3 | Multi-level grouping + subtotal/grand/running/percent | ⬜ | | |
-| [ ] | FR-M6.4 | Conditional formatting (color/icon/data-bar by rule) | ⬜ | | |
-| [ ] | FR-M6.5 | Prompt runtime params (date picker, dropdown) | ⬜ | | |
+| [x] | FR-M6.1 | Report = JSON definition portable (Report model + CRUD + validator, bound ke dataset M2) | ✅ | 2026-06-27 | |
+| [x] | FR-M6.2 | Render engine v1 (ReportRenderer): **table/list · grouped · KPI** → Tailwind HTML deterministik. Baki: matrix/chart/drill/doc/AI | ✅🟡 | 2026-06-27 | |
+| [x] | FR-M6.3 | Grouping + subtotal/grand total (single-level done; multi-level + running/percent baki) | ✅🟡 | 2026-06-27 | |
+| [x] | FR-M6.4 | Conditional formatting (rule field op value → warna; ikon/data-bar baki) | ✅🟡 | 2026-06-27 | |
+| [ ] | FR-M6.5 | Prompt runtime params (date picker, dropdown) — Slice 3 | ⬜ | | |
 
 ### M10 — Output & Export
 | ✓ | FR | Requirement | Status | Tarikh | Masa |

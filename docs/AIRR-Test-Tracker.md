@@ -21,6 +21,7 @@
 | `tests/Feature/KnowledgeBaseTest.php` | FR-M3.1/M3.2/M3.2a/M3.2b/M3.6/M3.9 — CRUD, gate, ingest→chunks, category, db_schema & rbac, **version history+log**, unsupported, reindex, cascade | 12 | ✅ | 2026-06-27 |
 | `tests/Feature/AuthTest.php` | FR-M1.1 — login, bad creds, pending gate, self-register, me auth/payload | 6 | ✅ | 2026-06-25 |
 | `tests/Feature/AdminCrudTest.php` | FR-M14.3/M14.x — project CRUD, owner scoping, user create, RBAC gating | 5 | ✅ | 2026-06-25 |
+| `tests/Feature/ReportTest.php` | FR-M6.1/M6.2/M6.3 — report CRUD, permission gate, type validation, **render table/grouped+subtotal/KPI to HTML** | 6 | ✅ | 2026-06-27 |
 
 ## Belum ada test (hutang test — tambah bila disentuh)
 

@@ -12,6 +12,7 @@ import ProjectsView from '../views/ProjectsView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import DataSourcesView from '../views/DataSourcesView.vue'
 import KnowledgeBaseView from '../views/KnowledgeBaseView.vue'
+import ReportsView from '../views/ReportsView.vue'
 import ComingSoonView from '../views/ComingSoonView.vue'
 
 // Real views for the modules that are already built.
@@ -23,6 +24,7 @@ const readyViews: Record<string, () => unknown> = {
   settings: () => SettingsView,
   datasources: () => DataSourcesView,
   'knowledge-base': () => KnowledgeBaseView,
+  reports: () => ReportsView,
 }
 
 // Build protected routes from the menu config so the two never drift.
