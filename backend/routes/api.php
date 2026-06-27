@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\AuditController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DatasetController;
 use App\Http\Controllers\Api\DataSourceController;
+use App\Http\Controllers\Api\FeatureController;
 use App\Http\Controllers\Api\KbDocumentController;
 use App\Http\Controllers\Api\KnowledgeBaseController;
 use App\Http\Controllers\Api\ProjectController;
@@ -117,6 +118,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('kb-documents/{kbDocument}/reindex', [KbDocumentController::class, 'reindex']);
         Route::delete('kb-documents/{kbDocument}', [KbDocumentController::class, 'destroy']);
     });
+
+    // Module readiness board (dashboard drill-down)
+    Route::get('modules/features/summary', [FeatureController::class, 'summary']);
+    Route::get('modules/{code}/features', [FeatureController::class, 'module']);
+    Route::put('features/{key}', [FeatureController::class, 'update'])->middleware('permission:settings.manage');
 
     // M6 — Report definitions + render engine
     Route::middleware('permission:reports.view')->group(function () {
