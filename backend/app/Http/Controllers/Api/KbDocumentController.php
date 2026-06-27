@@ -67,12 +67,62 @@ class KbDocumentController extends Controller
         // Record the embedding model that will apply (resolved centrally), then ingest.
         $knowledgeBase->update(['embedding_model' => $this->ingestion->embeddingModel($document)]);
         $document = $this->ingestion->ingest($document);
+        $document->snapshotVersion($request->user()->id, 'Initial upload'); // FR-M3.9 v1
 
         $this->audit->log('kb.document_ingested', KbDocument::class, $document->id, null, [
             'kb' => $knowledgeBase->id, 'status' => $document->status, 'chunks' => $document->chunk_count,
         ]);
 
         return $this->sendCreated($this->row($document));
+    }
+
+    // FR-M3.9 — upload a NEW VERSION of an existing document. Chunks are rebuilt
+    // from the new file; the prior version stays in the history log.
+    public function addVersion(Request $request, KbDocument $kbDocument): JsonResponse
+    {
+        if ($kbDocument->source_kind !== KbDocument::SOURCE_UPLOAD) {
+            return $this->sendError(422, 'NOT_VERSIONABLE', 'Only uploaded documents support file versions.');
+        }
+        $validated = $request->validate([
+            'file' => 'required|file|mimes:pdf,docx,xlsx,xls,md,markdown,txt|max:20480',
+            'note' => 'nullable|string|max:200',
+        ]);
+
+        $upload = $request->file('file');
+        $type = DocumentExtractor::detectType($upload->getClientOriginalName());
+        if (! $type) {
+            return $this->sendError(422, 'UNSUPPORTED_TYPE', 'Unsupported document type.');
+        }
+
+        $kbDocument->update([
+            'title'   => $upload->getClientOriginalName(),
+            'type'    => $type,
+            'path'    => $upload->store('kb_documents', 'local'),
+            'version' => $kbDocument->version + 1,
+        ]);
+        $kbDocument = $this->ingestion->ingest($kbDocument);
+        $kbDocument->snapshotVersion($request->user()->id, $validated['note'] ?? null);
+
+        $this->audit->log('kb.document_versioned', KbDocument::class, $kbDocument->id, null, [
+            'version' => $kbDocument->version, 'status' => $kbDocument->status, 'chunks' => $kbDocument->chunk_count,
+        ]);
+
+        return $this->sendCreated($this->row($kbDocument));
+    }
+
+    // FR-M3.9 — version history (the change log) for a document.
+    public function versions(KbDocument $kbDocument): JsonResponse
+    {
+        return $this->sendOk($kbDocument->versions()->with('author:id,name')->get()->map(fn ($v) => [
+            'version'     => $v->version,
+            'title'       => $v->title,
+            'type'        => $v->type,
+            'status'      => $v->status,
+            'chunk_count' => $v->chunk_count,
+            'note'        => $v->note,
+            'author'      => $v->author?->name,
+            'created_at'  => $v->created_at,
+        ]));
     }
 
     // FR-M3.2b — ingest AIRR's own system knowledge (DB schema, RBAC, …) into
@@ -104,6 +154,7 @@ class KbDocumentController extends Controller
         ]);
         $knowledgeBase->update(['embedding_model' => $this->ingestion->embeddingModel($document)]);
         $document = $this->ingestion->ingestText($document, $text);
+        $document->snapshotVersion($request->user()->id, 'Ingested from system source');
 
         $this->audit->log('kb.system_ingested', KbDocument::class, $document->id, null, [
             'kb' => $knowledgeBase->id, 'source' => $data['source'], 'chunks' => $document->chunk_count,
@@ -164,6 +215,7 @@ class KbDocumentController extends Controller
             'category'       => $d->category,
             'category_label' => $categoryName, // resolved display label
             'source_kind'    => $d->source_kind,
+            'version'        => $d->version,
             'status'         => $d->status,
             'chunk_count'    => $d->chunk_count,
             'error'          => $d->error,

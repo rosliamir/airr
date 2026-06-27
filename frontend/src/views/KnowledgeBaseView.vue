@@ -142,6 +142,46 @@ async function onUpload(e: Event) {
   }
 }
 
+// Versioning (FR-M3.9).
+const versionTargetId = ref<number | null>(null)
+const versionDoc = ref<KbDocument | null>(null)
+const versionHistory = ref<{ version: number; title: string; status: string; chunk_count: number; note: string | null; author: string | null; created_at: string }[] | null>(null)
+
+function triggerNewVersion(doc: KbDocument) {
+  versionTargetId.value = doc.id
+  ;(document.getElementById('kb-version-input') as HTMLInputElement)?.click()
+}
+
+async function onUploadVersion(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || !versionTargetId.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    await uploadFile(`/kb-documents/${versionTargetId.value}/versions`, fd)
+    if (selected.value) await openDetail(selected.value)
+  } catch (err) {
+    error.value = err instanceof ApiException ? err.error.message : 'New version failed'
+  } finally {
+    busy.value = false
+    input.value = ''
+    versionTargetId.value = null
+  }
+}
+
+async function viewHistory(doc: KbDocument) {
+  versionDoc.value = doc
+  versionHistory.value = null
+  try {
+    versionHistory.value = (await apiRequest<{ data: typeof versionHistory.value }>(`/kb-documents/${doc.id}/versions`)).data
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Failed to load history'
+  }
+}
+
 async function ingestSystem() {
   if (!selected.value) return
   ingestingSystem.value = true
@@ -306,7 +346,10 @@ onMounted(load)
                     <td><span class="text-xs rounded-full px-2 py-0.5" :class="statusBadge[d.status]">{{ d.status }}</span></td>
                     <td class="text-slate-600">{{ d.chunk_count }}</td>
                     <td class="text-right whitespace-nowrap">
-                      <button v-if="canManage" @click="reindex(d)" :disabled="busy" class="text-xs text-airr-600 hover:underline mr-3">Re-index</button>
+                      <span class="text-[10px] bg-slate-100 text-slate-500 rounded-full px-1.5 py-0.5 mr-2">v{{ d.version }}</span>
+                      <button @click="viewHistory(d)" class="text-xs text-slate-500 hover:underline mr-3">History</button>
+                      <button v-if="canManage && d.source_kind === 'upload'" @click="triggerNewVersion(d)" :disabled="busy" class="text-xs text-airr-600 hover:underline mr-3">New version</button>
+                      <button v-if="canManage && d.source_kind === 'upload'" @click="reindex(d)" :disabled="busy" class="text-xs text-airr-600 hover:underline mr-3">Re-index</button>
                       <button v-if="canManage" @click="removeDoc(d)" class="text-xs text-rose-500 hover:underline">Delete</button>
                     </td>
                   </tr>
@@ -315,6 +358,33 @@ onMounted(load)
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Hidden input for "New version" upload -->
+    <input id="kb-version-input" type="file" class="hidden" accept=".pdf,.docx,.xlsx,.xls,.md,.markdown,.txt" @change="onUploadVersion" />
+
+    <!-- Version history modal (FR-M3.9 log) -->
+    <div v-if="versionDoc" class="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50" @click.self="versionDoc = null">
+      <div class="bg-white rounded-xl p-6 w-full max-w-lg space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="font-semibold text-slate-800">Version history — {{ versionDoc.title }}</h2>
+          <button @click="versionDoc = null" class="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <div v-if="!versionHistory" class="text-sm text-slate-400">Loading…</div>
+        <div v-else-if="!versionHistory.length" class="text-sm text-slate-400">No version history.</div>
+        <ul v-else class="space-y-2 max-h-96 overflow-auto">
+          <li v-for="v in versionHistory" :key="v.version" class="border border-slate-100 rounded-lg p-3 text-sm">
+            <div class="flex items-center justify-between">
+              <span class="font-medium text-slate-700">v{{ v.version }} · {{ v.title }}</span>
+              <span class="text-xs rounded-full px-2 py-0.5" :class="statusBadge[v.status]">{{ v.status }}</span>
+            </div>
+            <div class="text-xs text-slate-400 mt-1">
+              {{ v.chunk_count }} chunks · {{ v.author ?? 'system' }} · {{ new Date(v.created_at).toLocaleString() }}
+            </div>
+            <div v-if="v.note" class="text-xs text-slate-500 mt-1 italic">“{{ v.note }}”</div>
+          </li>
+        </ul>
       </div>
     </div>
 

@@ -96,7 +96,7 @@
 | [x] | FR-M3.6 | Status ingestion (queued/processing/trained/error) + log error (IngestionService) | ✅ | 2026-06-25 | |
 | [ ] | FR-M3.7 | **Semantic schema cache** (term bisnes → table/column) | ⬜ | | |
 | [ ] | FR-M3.8 | Semantic retrieval (similarity search) untuk konteks prompt | ⬜ | | |
-| [ ] | FR-M3.9 | KB versioning, tagging, re-index, delete | ⬜ | | |
+| [x] | FR-M3.9 | KB versioning (KB.version + **per-document version history & log**), tagging, re-index, delete | ✅ | 2026-06-27 | |
 | [ ] | FR-M3.10 | **Zero-trust access filtering** ikut role/clearance | ⬜ | | |
 
 ---

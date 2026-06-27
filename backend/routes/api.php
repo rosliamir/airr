@@ -104,6 +104,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('knowledge-bases', [KnowledgeBaseController::class, 'index']);
         Route::get('knowledge-bases/{knowledgeBase}', [KnowledgeBaseController::class, 'show']);
         Route::get('knowledge-bases/{knowledgeBase}/documents', [KbDocumentController::class, 'index']);
+        Route::get('kb-documents/{kbDocument}/versions', [KbDocumentController::class, 'versions']);
     });
     Route::middleware('permission:kb.manage')->group(function () {
         Route::post('knowledge-bases', [KnowledgeBaseController::class, 'store']);
@@ -111,6 +112,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('knowledge-bases/{knowledgeBase}', [KnowledgeBaseController::class, 'destroy']);
         Route::post('knowledge-bases/{knowledgeBase}/documents', [KbDocumentController::class, 'store']);
         Route::post('knowledge-bases/{knowledgeBase}/system', [KbDocumentController::class, 'ingestSystem']);
+        Route::post('kb-documents/{kbDocument}/versions', [KbDocumentController::class, 'addVersion']);
         Route::post('kb-documents/{kbDocument}/reindex', [KbDocumentController::class, 'reindex']);
         Route::delete('kb-documents/{kbDocument}', [KbDocumentController::class, 'destroy']);
     });

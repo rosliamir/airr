@@ -137,6 +137,31 @@ class KnowledgeBaseTest extends TestCase
             ->assertStatus(422);
     }
 
+    public function test_new_version_increments_and_logs_history(): void // FR-M3.9
+    {
+        Storage::fake('local');
+        $this->actingWithPermissions(['kb.manage', 'kb.view']);
+        $kb = KnowledgeBase::create(['name' => 'Specs', 'version' => 1]);
+
+        $v1 = UploadedFile::fake()->createWithContent('srs.md', "# SRS v1\nOne section.");
+        $docId = $this->postJson("/api/knowledge-bases/{$kb->id}/documents", ['file' => $v1, 'category' => 'srs'])
+            ->assertCreated()->assertJsonPath('data.version', 1)->json('data.id');
+
+        $v2 = UploadedFile::fake()->createWithContent('srs.md', "# SRS v2\nUpdated.\n\n## Extra\nMore.");
+        $this->postJson("/api/kb-documents/{$docId}/versions", ['file' => $v2, 'note' => 'Added Extra section'])
+            ->assertCreated()->assertJsonPath('data.version', 2);
+
+        // History log has both versions, newest first.
+        $history = $this->getJson("/api/kb-documents/{$docId}/versions")->assertOk();
+        $history->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.version', 2)
+            ->assertJsonPath('data.0.note', 'Added Extra section')
+            ->assertJsonPath('data.1.version', 1);
+
+        // Active chunks reflect the latest version only.
+        $this->assertStringContainsString('Updated', $kb->chunks()->get()->pluck('content')->implode(' '));
+    }
+
     public function test_reindex_rebuilds_chunks(): void
     {
         Storage::fake('local');
