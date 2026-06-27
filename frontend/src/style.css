@@ -11,3 +11,36 @@
 body {
   @apply bg-slate-50 text-slate-800 antialiased;
 }
+
+/* ===== Themes (M14) — applied via html[data-theme]. Classic = default (no rules). =====
+   Themes retint the shared utility classes so every view follows without per-view edits. */
+
+/* --- Dark mode --- */
+html[data-theme="dark"] body { background-color: #0b1220; color: #e2e8f0; }
+html[data-theme="dark"] .bg-white { background-color: #111a2e !important; }
+html[data-theme="dark"] .bg-slate-50 { background-color: #0b1220 !important; }
+html[data-theme="dark"] .bg-slate-100 { background-color: #1c2640 !important; }
+html[data-theme="dark"] .border-slate-100,
+html[data-theme="dark"] .border-slate-200 { border-color: #243150 !important; }
+html[data-theme="dark"] .text-slate-800,
+html[data-theme="dark"] .text-slate-700 { color: #e8edf6 !important; }
+html[data-theme="dark"] .text-slate-600,
+html[data-theme="dark"] .text-slate-500 { color: #aab6cc !important; }
+html[data-theme="dark"] .text-slate-400 { color: #6b7a96 !important; }
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea { background-color: #0e1729 !important; color: #e2e8f0 !important; }
+html[data-theme="dark"] .divide-slate-100 > * + * { border-color: #243150 !important; }
+
+/* --- Vibration mode (colorful) --- */
+html[data-theme="vibration"] body {
+  background: linear-gradient(135deg, #fdf2f8 0%, #eef2ff 50%, #ecfeff 100%);
+}
+html[data-theme="vibration"] .bg-slate-50 { background: transparent !important; }
+html[data-theme="vibration"] .bg-white {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(4px);
+}
+html[data-theme="vibration"] aside { background: linear-gradient(180deg, #fff1f2 0%, #faf5ff 100%) !important; }
+html[data-theme="vibration"] .text-slate-700,
+html[data-theme="vibration"] .text-slate-800 { color: #4c1d95 !important; }

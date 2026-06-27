@@ -38,6 +38,7 @@ Route::prefix('auth')->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('auth/me', [AuthController::class, 'me']);
     Route::post('auth/logout', [AuthController::class, 'logout']);
+    Route::put('me/current-project', [AuthController::class, 'setCurrentProject']);
 
     // M1.5 — audit trail (read gated)
     Route::get('audit', [AuditController::class, 'index'])->middleware('permission:audit.read');

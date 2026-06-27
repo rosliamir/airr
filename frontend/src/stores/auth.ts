@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { apiRequest, setToken } from '../api/client'
 
+export type ProjectRef = { id: number; code: string; name: string }
 export type AuthUser = {
   id: number
   name: string
@@ -12,6 +13,8 @@ export type AuthUser = {
   clearance: number
   edition: string
   features: string[]
+  current_project: ProjectRef | null
+  projects: ProjectRef[]
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -85,6 +88,14 @@ export const useAuthStore = defineStore('auth', {
         this.user = null
         setToken(null)
       }
+    },
+    // FR-M14 — switch the current project (default authoring scope).
+    async setCurrentProject(projectId: number | null) {
+      const res = await apiRequest<{ data: AuthUser }>('/me/current-project', {
+        method: 'PUT',
+        body: JSON.stringify({ project_id: projectId }),
+      })
+      this.user = res.data
     },
     async logout() {
       try {

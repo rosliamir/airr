@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
+import { Eye, EyeOff } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { ApiException } from '../api/client'
 import AirrLogo from '../components/AirrLogo.vue'
@@ -10,6 +11,7 @@ const auth = useAuthStore()
 const router = useRouter()
 const email = ref('admin@airr.technology')
 const password = ref('airr12345')
+const showPassword = ref(false)
 const error = ref('')
 const info = ref('')
 
@@ -94,8 +96,14 @@ const year = 2026
             <label class="block text-sm font-medium text-slate-600">Password</label>
             <RouterLink :to="{ name: 'forgot-password' }" class="text-xs text-airr-600 hover:underline">Forgot password?</RouterLink>
           </div>
-          <input v-model="password" type="password" required autocomplete="current-password"
-            class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 focus:border-airr-500 outline-none" />
+          <div class="relative">
+            <input v-model="password" :type="showPassword ? 'text' : 'password'" required autocomplete="current-password"
+              class="w-full rounded-lg border border-slate-200 px-3 py-2 pr-10 focus:ring-2 focus:ring-airr-300 focus:border-airr-500 outline-none" />
+            <button type="button" @click="showPassword = !showPassword" :title="showPassword ? 'Hide' : 'Show'"
+              class="absolute inset-y-0 right-2 flex items-center text-slate-400 hover:text-slate-600">
+              <component :is="showPassword ? EyeOff : Eye" :size="18" />
+            </button>
+          </div>
         </div>
 
         <p v-if="error" class="text-sm text-airr-700 bg-airr-50 rounded-lg px-3 py-2">{{ error }}</p>

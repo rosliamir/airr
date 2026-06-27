@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
+import { Eye, EyeOff, MailCheck } from 'lucide-vue-next'
 import { apiRequest, ApiException, uploadFile } from '../../api/client'
 import UserAvatar from '../UserAvatar.vue'
+
+const showPassword = ref(false)
+// Basic email validity for inline feedback (test-email action is a placeholder).
+const emailValid = computed(() => !form.value.email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.value.email))
+function testEmail() {
+  // TODO: wire to a backend "verify email deliverability" endpoint.
+  alert(emailValid.value ? 'Email format looks valid. (Delivery test not implemented yet.)' : 'Invalid email format.')
+}
 
 type Role = { id: number; slug: string; name: string }
 type UserRow = {
@@ -232,7 +241,16 @@ onMounted(load)
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-600 mb-1">Email</label>
-            <input v-model="form.email" type="email" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
+            <div class="relative">
+              <input v-model="form.email" type="email"
+                class="w-full rounded-lg border px-3 py-2 pr-10 focus:ring-2 outline-none"
+                :class="emailValid ? 'border-slate-200 focus:ring-airr-300' : 'border-rose-300 focus:ring-rose-300'" />
+              <button type="button" @click="testEmail" title="Test email"
+                class="absolute inset-y-0 right-2 flex items-center text-slate-400 hover:text-airr-600">
+                <component :is="MailCheck" :size="17" />
+              </button>
+            </div>
+            <p v-if="!emailValid" class="text-xs text-rose-500 mt-1">Invalid email format.</p>
           </div>
         </div>
 
@@ -240,7 +258,14 @@ onMounted(load)
           <label class="block text-sm font-medium text-slate-600 mb-1">
             Password <span class="text-slate-400 font-normal">{{ editing ? '(leave blank to keep)' : '(min 8 chars)' }}</span>
           </label>
-          <input v-model="form.password" type="password" autocomplete="new-password" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
+          <div class="relative">
+            <input v-model="form.password" :type="showPassword ? 'text' : 'password'" autocomplete="new-password"
+              class="w-full rounded-lg border border-slate-200 px-3 py-2 pr-10 focus:ring-2 focus:ring-airr-300 outline-none" />
+            <button type="button" @click="showPassword = !showPassword" :title="showPassword ? 'Hide' : 'Show'"
+              class="absolute inset-y-0 right-2 flex items-center text-slate-400 hover:text-slate-600">
+              <component :is="showPassword ? EyeOff : Eye" :size="17" />
+            </button>
+          </div>
         </div>
 
         <div class="grid grid-cols-3 gap-3">

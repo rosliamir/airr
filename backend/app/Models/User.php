@@ -13,7 +13,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password', 'status', 'user_type', 'created_by', 'auth_provider', 'google_id', 'avatar_url'])]
+#[Fillable(['name', 'email', 'password', 'status', 'user_type', 'current_project_id', 'created_by', 'auth_provider', 'google_id', 'avatar_url'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -51,6 +51,31 @@ class User extends Authenticatable
     public function projects(): BelongsToMany
     {
         return $this->belongsToMany(Project::class);
+    }
+
+    public function currentProject(): BelongsTo
+    {
+        return $this->belongsTo(Project::class, 'current_project_id');
+    }
+
+    /** Projects this user may work in (admins: all; else owned/member). */
+    public function accessibleProjects()
+    {
+        $q = Project::query()->orderBy('name');
+
+        return $this->seesEverything() ? $q : $q->visibleTo($this);
+    }
+
+    /** Ensure a current project is set on login; default to the first accessible. */
+    public function ensureCurrentProject(): void
+    {
+        if ($this->current_project_id && $this->accessibleProjects()->whereKey($this->current_project_id)->exists()) {
+            return;
+        }
+        $first = $this->accessibleProjects()->first();
+        if ($first && $first->id !== $this->current_project_id) {
+            $this->forceFill(['current_project_id' => $first->id])->save();
+        }
     }
 
     /**

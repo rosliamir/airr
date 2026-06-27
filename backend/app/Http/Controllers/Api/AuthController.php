@@ -116,6 +116,20 @@ class AuthController extends Controller
         return $this->sendOk($this->userPayload($request->user()));
     }
 
+    // FR-M14 — switch the user's current project (the default authoring scope).
+    public function setCurrentProject(Request $request): JsonResponse
+    {
+        $data = $request->validate(['project_id' => 'nullable|integer|exists:projects,id']);
+        $user = $request->user();
+
+        if ($data['project_id'] && ! $user->accessibleProjects()->whereKey($data['project_id'])->exists()) {
+            return $this->sendError(403, 'FORBIDDEN', 'You do not have access to that project.');
+        }
+        $user->forceFill(['current_project_id' => $data['project_id'] ?? null])->save();
+
+        return $this->sendOk($this->userPayload($user->fresh()));
+    }
+
     public function logout(Request $request): JsonResponse
     {
         $request->user()->currentAccessToken()?->delete();
@@ -197,17 +211,23 @@ class AuthController extends Controller
 
     private function userPayload(User $user): array
     {
+        $user->ensureCurrentProject(); // default a current project on login (FR-M14)
+        $projects = $user->accessibleProjects()->get(['projects.id', 'code', 'name']);
+        $current = $projects->firstWhere('id', $user->current_project_id);
+
         return [
-            'id'          => $user->id,
-            'name'        => $user->name,
-            'email'       => $user->email,
-            'avatar_url'  => $user->avatar_url,
-            'user_type'   => $user->user_type,
-            'roles'       => $user->roles()->pluck('slug'),
-            'permissions' => $user->permissionKeys(),
-            'clearance'   => $user->clearance(),
-            'edition'     => Edition::current(),
-            'features'    => Edition::enabledFeatures(),
+            'id'              => $user->id,
+            'name'            => $user->name,
+            'email'           => $user->email,
+            'avatar_url'      => $user->avatar_url,
+            'user_type'       => $user->user_type,
+            'roles'           => $user->roles()->pluck('slug'),
+            'permissions'     => $user->permissionKeys(),
+            'clearance'       => $user->clearance(),
+            'edition'         => Edition::current(),
+            'features'        => Edition::enabledFeatures(),
+            'current_project' => $current ? ['id' => $current->id, 'code' => $current->code, 'name' => $current->name] : null,
+            'projects'        => $projects->map(fn ($p) => ['id' => $p->id, 'code' => $p->code, 'name' => $p->name])->values(),
         ];
     }
 }
