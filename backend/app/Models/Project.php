@@ -28,6 +28,11 @@ class Project extends Model
         return $this->belongsToMany(User::class);
     }
 
+    public function reports(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Report::class);
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');

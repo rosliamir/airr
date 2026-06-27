@@ -19,6 +19,8 @@ type Project = {
   ai_config: { provider?: string; models?: Record<string, string> } | null
   creator: { id: number; name: string } | null
   users_count: number
+  reports_count: number
+  templates_count: number
   users?: Member[]
 }
 
@@ -208,7 +210,7 @@ onMounted(() => {
           <div class="text-xs text-slate-400">
             {{ p.start_date ?? '—' }} → {{ p.end_date ?? '—' }}
           </div>
-          <div class="text-xs text-slate-500">{{ p.users_count }} users</div>
+          <div class="text-xs text-slate-500">{{ p.users_count }} users · {{ p.reports_count }} reports · {{ p.templates_count }} templates</div>
           <div v-if="canManage" class="flex gap-3 pt-1 mt-auto">
             <button @click="openEdit(p)" class="text-xs text-airr-600 hover:underline">Edit</button>
             <button @click="remove(p)" :disabled="busy" class="text-xs text-rose-600 hover:underline">Delete</button>

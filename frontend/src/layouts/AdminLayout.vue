@@ -8,6 +8,7 @@ import { useAuthStore } from '../stores/auth'
 import { THEMES, theme, applyTheme, type Theme } from '../composables/theme'
 import AirrLogo from '../components/AirrLogo.vue'
 import UserAvatar from '../components/UserAvatar.vue'
+import ProjectAvatar from '../components/ProjectAvatar.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -15,11 +16,21 @@ const router = useRouter()
 // User dropdown (top-right) + current-project switch + theme.
 const menuOpen = ref(false)
 const switching = ref(false)
+const projectSearch = ref('')
+
+const allProjects = computed(() => auth.user?.projects ?? [])
+const useSearch = computed(() => allProjects.value.length >= 10) // <10 = chip grid, else searchable list
+const filteredProjects = computed(() => {
+  const q = projectSearch.value.trim().toLowerCase()
+  if (!q) return allProjects.value
+  return allProjects.value.filter((p) => p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q))
+})
+const shortName = (s: string) => s.slice(0, 5)
 
 async function switchProject(id: number | null) {
-  if (id === (auth.user?.current_project?.id ?? null)) return
+  if (id === (auth.user?.current_project?.id ?? null)) { menuOpen.value = false; return }
   switching.value = true
-  try { await auth.setCurrentProject(id) } finally { switching.value = false }
+  try { await auth.setCurrentProject(id) } finally { switching.value = false; menuOpen.value = false }
 }
 function chooseTheme(t: Theme) { applyTheme(t) }
 
@@ -107,10 +118,13 @@ async function logout() {
         </slot>
 
         <div class="flex items-center gap-3">
-          <!-- Current project chip -->
-          <div v-if="auth.user?.current_project" class="hidden sm:flex items-center gap-1.5 text-sm text-slate-500">
-            <component :is="icons.FolderKanban" :size="15" class="text-airr-500" />
-            <span class="font-medium text-slate-700">{{ auth.user.current_project.name }}</span>
+          <!-- Current project chip (colored avatar + short name) -->
+          <div v-if="auth.user?.current_project" class="hidden sm:flex items-center gap-2 text-sm">
+            <ProjectAvatar :name="auth.user.current_project.name" :code="auth.user.current_project.code" :color="auth.user.current_project.color" :size="26" />
+            <div class="leading-tight">
+              <div class="font-semibold text-slate-700">{{ auth.user.current_project.name }}</div>
+              <div class="text-[10px] text-slate-400">{{ auth.user.current_project.code }} · {{ auth.user.current_project.reports_count }} reports</div>
+            </div>
           </div>
 
           <!-- Notifications (placeholder) -->
@@ -140,16 +154,44 @@ async function logout() {
                 </span>
               </div>
 
-              <!-- Current project -->
+              <!-- Current project switcher -->
               <div class="p-4 border-b border-slate-100">
                 <label class="block text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Current project</label>
-                <select :value="auth.user?.current_project?.id ?? ''" @change="switchProject(($event.target as HTMLSelectElement).value ? Number(($event.target as HTMLSelectElement).value) : null)"
-                  :disabled="switching"
-                  class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-airr-300 outline-none">
-                  <option value="">— none —</option>
-                  <option v-for="p in auth.user?.projects ?? []" :key="p.id" :value="p.id">{{ p.code }} — {{ p.name }}</option>
-                </select>
-                <p class="text-[11px] text-slate-400 mt-1">Default scope for authoring. Set here.</p>
+
+                <!-- Many projects: search + list -->
+                <template v-if="useSearch">
+                  <input v-model="projectSearch" type="search" placeholder="Search projects…"
+                    class="w-full mb-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
+                  <div class="max-h-52 overflow-y-auto space-y-0.5">
+                    <button v-for="p in filteredProjects" :key="p.id" @click="switchProject(p.id)" :disabled="switching"
+                      class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-slate-50"
+                      :class="p.id === auth.user?.current_project?.id ? 'bg-airr-50' : ''">
+                      <ProjectAvatar :name="p.name" :code="p.code" :color="p.color" :size="24" />
+                      <span class="flex-1 min-w-0">
+                        <span class="block text-sm text-slate-700 truncate">{{ p.name }}</span>
+                        <span class="block text-[10px] text-slate-400">{{ p.code }} · {{ p.reports_count }} reports</span>
+                      </span>
+                      <component v-if="p.id === auth.user?.current_project?.id" :is="icons.Check" :size="14" class="text-airr-600" />
+                    </button>
+                    <p v-if="!filteredProjects.length" class="text-xs text-slate-400 px-2 py-1">No match.</p>
+                  </div>
+                </template>
+
+                <!-- Few projects (<10): avatar chips -->
+                <div v-else class="grid grid-cols-2 gap-1.5">
+                  <button v-for="p in allProjects" :key="p.id" @click="switchProject(p.id)" :disabled="switching"
+                    class="flex items-center gap-2 px-2 py-1.5 rounded-lg border text-left transition"
+                    :class="p.id === auth.user?.current_project?.id ? 'border-airr-300 bg-airr-50' : 'border-slate-100 hover:bg-slate-50'">
+                    <ProjectAvatar :name="p.name" :code="p.code" :color="p.color" :size="24" />
+                    <span class="min-w-0">
+                      <span class="block text-xs font-medium text-slate-700 truncate" :title="p.name">{{ shortName(p.name) }}</span>
+                      <span class="block text-[10px] text-slate-400">{{ p.reports_count }} rpt</span>
+                    </span>
+                  </button>
+                  <p v-if="!allProjects.length" class="col-span-2 text-xs text-slate-400 px-1">No projects assigned.</p>
+                </div>
+
+                <p class="text-[11px] text-slate-400 mt-2">Default scope for authoring. Set here.</p>
               </div>
 
               <!-- Theme -->

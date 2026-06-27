@@ -20,7 +20,7 @@ class ProjectController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $query = Project::query()->withCount(['users'])->with('creator:id,name');
+        $query = Project::query()->withCount(['users', 'reports'])->with('creator:id,name');
 
         // Owner+membership scoping — admins see everything.
         $viewer = $request->user();
@@ -120,7 +120,9 @@ class ProjectController extends Controller
             'description' => $p->description,
             'ai_config'   => $p->ai_config,
             'creator'     => $p->creator ? ['id' => $p->creator->id, 'name' => $p->creator->name] : null,
-            'users_count' => $p->users_count ?? $p->users()->count(),
+            'users_count'   => $p->users_count ?? $p->users()->count(),
+            'reports_count' => $p->reports_count ?? $p->reports()->count(),
+            'templates_count' => 0, // Templates module not built yet (M6)
             // Detail-only (present when loaded):
             'users'  => $p->relationLoaded('users') ? $p->users->map(fn ($u) => ['id' => $u->id, 'name' => $u->name, 'email' => $u->email]) : null,
         ];

@@ -212,7 +212,7 @@ class AuthController extends Controller
     private function userPayload(User $user): array
     {
         $user->ensureCurrentProject(); // default a current project on login (FR-M14)
-        $projects = $user->accessibleProjects()->get(['projects.id', 'code', 'name']);
+        $projects = $user->accessibleProjects()->withCount('reports')->get(['projects.id', 'code', 'name', 'color']);
         $current = $projects->firstWhere('id', $user->current_project_id);
 
         return [
@@ -226,8 +226,19 @@ class AuthController extends Controller
             'clearance'       => $user->clearance(),
             'edition'         => Edition::current(),
             'features'        => Edition::enabledFeatures(),
-            'current_project' => $current ? ['id' => $current->id, 'code' => $current->code, 'name' => $current->name] : null,
-            'projects'        => $projects->map(fn ($p) => ['id' => $p->id, 'code' => $p->code, 'name' => $p->name])->values(),
+            'current_project' => $current ? $this->projectRef($current) : null,
+            'projects'        => $projects->map(fn ($p) => $this->projectRef($p))->values(),
+        ];
+    }
+
+    private function projectRef($p): array
+    {
+        return [
+            'id'            => $p->id,
+            'code'          => $p->code,
+            'name'          => $p->name,
+            'color'         => $p->color,
+            'reports_count' => $p->reports_count ?? 0,
         ];
     }
 }

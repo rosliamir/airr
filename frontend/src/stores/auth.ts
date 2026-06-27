@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { apiRequest, setToken } from '../api/client'
 
-export type ProjectRef = { id: number; code: string; name: string }
+export type ProjectRef = { id: number; code: string; name: string; color: string | null; reports_count: number }
 export type AuthUser = {
   id: number
   name: string
