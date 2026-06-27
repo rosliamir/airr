@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\DataSourceController;
 use App\Http\Controllers\Api\FeatureController;
 use App\Http\Controllers\Api\KbDocumentController;
 use App\Http\Controllers\Api\KnowledgeBaseController;
+use App\Http\Controllers\Api\MenuController;
 use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RoleController;
@@ -52,6 +53,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('users/{user}/suspend', [UserController::class, 'suspend']);
         Route::post('users/{user}/reactivate', [UserController::class, 'reactivate']);
         Route::post('users/{user}/avatar', [UserController::class, 'uploadAvatar']);
+    });
+
+    // M14 — DB-driven navigation. nav() for any user; CRUD gated by menus.manage.
+    Route::get('menus/nav', [MenuController::class, 'nav']);
+    Route::middleware('permission:menus.manage')->group(function () {
+        Route::get('menus', [MenuController::class, 'index']);
+        Route::post('menus', [MenuController::class, 'store']);
+        Route::put('menus/{menu}', [MenuController::class, 'update']);
+        Route::delete('menus/{menu}', [MenuController::class, 'destroy']);
     });
 
     // M14 — role administration (gated by roles.manage)

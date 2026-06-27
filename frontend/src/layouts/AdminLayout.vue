@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import * as icons from 'lucide-vue-next'
 import { adminMenu, type MenuItem } from '../config/admin-menu'
+import { apiRequest } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import AirrLogo from '../components/AirrLogo.vue'
 import UserAvatar from '../components/UserAvatar.vue'
@@ -10,22 +11,43 @@ import UserAvatar from '../components/UserAvatar.vue'
 const auth = useAuthStore()
 const router = useRouter()
 
-function iconFor(name: string) {
-  return (icons as Record<string, unknown>)[name] ?? icons.Circle
+function iconFor(name: string | undefined) {
+  return (name && (icons as Record<string, unknown>)[name]) || icons.Circle
 }
 
-// A menu item is visible when the user holds its permission AND its edition feature.
+type NavItem = { label: string; route: string | null; icon?: string }
+type NavGroup = { title: string | null; items: NavItem[] }
+
+// A static-config item is visible when the user holds its permission AND feature.
 function visible(item: MenuItem): boolean {
   if (item.permission && !auth.can(item.permission)) return false
   if (item.feature && !auth.hasFeature(item.feature)) return false
   return true
 }
 
-const groups = computed(() =>
+const staticGroups = computed<NavGroup[]>(() =>
   adminMenu
-    .map((g) => ({ ...g, items: g.items.filter(visible) }))
+    .map((g) => ({ title: g.title, items: g.items.filter(visible) as NavItem[] }))
     .filter((g) => g.items.length > 0),
 )
+
+// DB-driven nav (M14). Falls back to the static config if unavailable.
+const apiGroups = ref<NavGroup[] | null>(null)
+const groups = computed<NavGroup[]>(() => apiGroups.value ?? staticGroups.value)
+
+type NavNode = { label: string; route: string | null; icon?: string; children?: NavNode[] }
+onMounted(async () => {
+  try {
+    const tree = (await apiRequest<{ data: NavNode[] }>('/menus/nav')).data
+    if (tree.length) {
+      apiGroups.value = tree.map((n) =>
+        n.route
+          ? { title: null, items: [{ label: n.label, route: n.route, icon: n.icon }] }
+          : { title: n.label, items: (n.children ?? []).map((c) => ({ label: c.label, route: c.route, icon: c.icon })) },
+      ).filter((g) => g.items.length > 0)
+    }
+  } catch { /* keep static fallback */ }
+})
 
 async function logout() {
   await auth.logout()
@@ -52,15 +74,13 @@ async function logout() {
           </p>
           <RouterLink
             v-for="item in group.items"
-            :key="item.route"
-            :to="{ name: item.route }"
+            :key="item.route ?? item.label"
+            :to="{ name: item.route ?? 'dashboard' }"
             class="group flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition"
             active-class="bg-airr-50 text-airr-700 font-medium"
           >
             <component :is="iconFor(item.icon)" :size="17" class="shrink-0" />
             <span class="flex-1">{{ item.label }}</span>
-            <span v-if="!item.ready"
-              class="text-[8px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 uppercase">P{{ item.phase }}</span>
           </RouterLink>
         </div>
       </nav>

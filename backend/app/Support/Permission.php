@@ -36,6 +36,9 @@ class Permission
     const PROJECTS_VIEW   = 'projects.view';
     const PROJECTS_MANAGE = 'projects.manage';
 
+    // Menu administration (M14 — DB-driven navigation)
+    const MENUS_MANAGE = 'menus.manage';
+
     public static function all(): array
     {
         return [
@@ -46,6 +49,7 @@ class Permission
             self::APIKEYS_MANAGE,
             self::USERS_MANAGE, self::ROLES_MANAGE, self::AUDIT_READ, self::SETTINGS_MANAGE,
             self::PROJECTS_VIEW, self::PROJECTS_MANAGE,
+            self::MENUS_MANAGE,
         ];
     }
 }

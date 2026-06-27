@@ -22,6 +22,8 @@
 | `tests/Feature/AuthTest.php` | FR-M1.1 — login, bad creds, pending gate, self-register, me auth/payload | 6 | ✅ | 2026-06-25 |
 | `tests/Feature/AdminCrudTest.php` | FR-M14.3/M14.x — project CRUD, owner scoping, user create, RBAC gating | 5 | ✅ | 2026-06-25 |
 | `tests/Feature/ReportTest.php` | FR-M6.1/M6.2/M6.3 — report CRUD, permission gate, type validation, **render table/grouped+subtotal/KPI to HTML** | 6 | ✅ | 2026-06-27 |
+| `tests/Feature/MenuTest.php` | M14 DB-driven nav — permission-filtered nav, empty-group hidden, CRUD gate, create | 4 | ✅ | 2026-06-27 |
+| `tests/Feature/FeatureBoardTest.php` | Dashboard readiness — merge facts+status, permission gate, toggle, summary | 4 | ✅ | 2026-06-27 |
 
 ## Belum ada test (hutang test — tambah bila disentuh)
 
