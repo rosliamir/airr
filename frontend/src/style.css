@@ -32,15 +32,29 @@ html[data-theme="dark"] select,
 html[data-theme="dark"] textarea { background-color: #0e1729 !important; color: #e2e8f0 !important; }
 html[data-theme="dark"] .divide-slate-100 > * + * { border-color: #243150 !important; }
 
-/* --- Vibration mode (colorful) --- */
+/* --- Vibration mode (bright & colorful) --- */
 html[data-theme="vibration"] body {
-  background: linear-gradient(135deg, #fdf2f8 0%, #eef2ff 50%, #ecfeff 100%);
+  background: linear-gradient(135deg, #ff6ec4 0%, #7873f5 38%, #21d4fd 72%, #21fda5 100%);
+  background-attachment: fixed;
 }
 html[data-theme="vibration"] .bg-slate-50 { background: transparent !important; }
 html[data-theme="vibration"] .bg-white {
-  background-color: rgba(255, 255, 255, 0.85) !important;
-  backdrop-filter: blur(4px);
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 20px rgba(120, 40, 200, 0.12);
 }
-html[data-theme="vibration"] aside { background: linear-gradient(180deg, #fff1f2 0%, #faf5ff 100%) !important; }
-html[data-theme="vibration"] .text-slate-700,
-html[data-theme="vibration"] .text-slate-800 { color: #4c1d95 !important; }
+html[data-theme="vibration"] aside {
+  background: linear-gradient(180deg, #ff8fe0 0%, #8b7bff 55%, #4fc3ff 100%) !important;
+  border-right-color: transparent !important;
+}
+/* Bright sidebar text on the colorful panel */
+html[data-theme="vibration"] aside .text-slate-600,
+html[data-theme="vibration"] aside .text-slate-400,
+html[data-theme="vibration"] aside .font-bold { color: #ffffff !important; }
+html[data-theme="vibration"] aside a:hover { background-color: rgba(255,255,255,0.25) !important; }
+html[data-theme="vibration"] aside .router-link-active,
+html[data-theme="vibration"] aside .bg-airr-50 { background-color: rgba(255,255,255,0.85) !important; color: #7c3aed !important; }
+html[data-theme="vibration"] header { background: rgba(255,255,255,0.75) !important; backdrop-filter: blur(6px); }
+html[data-theme="vibration"] .text-slate-800 { color: #6d28d9 !important; }
+html[data-theme="vibration"] .text-airr-600,
+html[data-theme="vibration"] .text-airr-700 { color: #d6249f !important; }

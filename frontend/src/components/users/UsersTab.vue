@@ -32,12 +32,9 @@ const error = ref('')
 const busy = ref(false)
 const filter = ref<'all' | 'pending' | 'active' | 'suspended'>('all')
 
-const USER_TYPES = [
-  { value: 'system_admin', label: 'System Admin' },
-  { value: 'admin', label: 'Admin' },
-  { value: 'user', label: 'User' },
-]
-const typeLabel = (v: string) => USER_TYPES.find((t) => t.value === v)?.label ?? v
+// User types sourced from the lookup (Settings → Lookup), not hardcoded.
+const USER_TYPES = ref<{ value: string; label: string }[]>([])
+const typeLabel = (v: string) => USER_TYPES.value.find((t) => t.value === v)?.label ?? v
 
 const filtered = computed(() => (filter.value === 'all' ? users.value : users.value.filter((u) => u.status === filter.value)))
 const pendingCount = computed(() => users.value.filter((u) => u.status === 'pending').length)
@@ -59,6 +56,9 @@ async function load() {
     ])
     users.value = u.data
     roles.value = r.data
+    if (!USER_TYPES.value.length) {
+      USER_TYPES.value = (await apiRequest<{ data: { value: string; label: string }[] }>('/lookups?category=user_type')).data
+    }
   } catch (e) {
     error.value = e instanceof ApiException ? e.error.message : 'Failed to load users'
   } finally {

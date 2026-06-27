@@ -33,7 +33,6 @@ const switching = ref(false)
 const projectSearch = ref('')
 
 const allProjects = computed(() => auth.user?.projects ?? [])
-const useSearch = computed(() => allProjects.value.length >= 10) // <10 = chip grid, else searchable list
 const filteredProjects = computed(() => {
   const q = projectSearch.value.trim().toLowerCase()
   if (!q) return allProjects.value
@@ -176,9 +175,9 @@ async function logout() {
             </button>
 
             <!-- backdrop -->
-            <div v-if="menuOpen" class="fixed inset-0 z-40" @click="menuOpen = false"></div>
+            <div v-if="menuOpen" class="fixed inset-0 z-[90]" @click="menuOpen = false"></div>
 
-            <div v-if="menuOpen" class="absolute right-0 mt-2 w-72 bg-white rounded-xl border border-slate-100 shadow-lg z-50 overflow-hidden">
+            <div v-if="menuOpen" class="absolute right-0 mt-2 w-72 bg-white rounded-xl border border-slate-200 shadow-xl z-[100] overflow-hidden">
               <!-- Identity + edition -->
               <div class="p-4 border-b border-slate-100">
                 <div class="font-semibold text-slate-800">{{ auth.user?.name }}</div>
@@ -192,28 +191,11 @@ async function logout() {
               <div class="p-4 border-b border-slate-100">
                 <label class="block text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Current project</label>
 
-                <!-- Many projects: search + list -->
-                <template v-if="useSearch">
-                  <input v-model="projectSearch" type="search" placeholder="Search projects…"
-                    class="w-full mb-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
-                  <div class="max-h-52 overflow-y-auto space-y-0.5">
-                    <button v-for="p in filteredProjects" :key="p.id" @click="switchProject(p.id)" :disabled="switching"
-                      class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-slate-50"
-                      :class="p.id === auth.user?.current_project?.id ? 'bg-airr-50' : ''">
-                      <ProjectAvatar :name="p.name" :code="p.code" :color="p.color" :size="24" />
-                      <span class="flex-1 min-w-0">
-                        <span class="block text-sm text-slate-700 truncate">{{ p.name }}</span>
-                        <span class="block text-[10px] text-slate-400">{{ p.code }} · {{ p.reports_count }} reports</span>
-                      </span>
-                      <component v-if="p.id === auth.user?.current_project?.id" :is="icons.Check" :size="14" class="text-airr-600" />
-                    </button>
-                    <p v-if="!filteredProjects.length" class="text-xs text-slate-400 px-2 py-1">No match.</p>
-                  </div>
-                </template>
-
-                <!-- Few projects (<10): avatar chips -->
-                <div v-else class="grid grid-cols-2 gap-1.5">
-                  <button v-for="p in allProjects" :key="p.id" @click="switchProject(p.id)" :disabled="switching"
+                <!-- Always searchable; scrolls when projects grow -->
+                <input v-if="allProjects.length > 6" v-model="projectSearch" type="search" placeholder="Search projects…"
+                  class="w-full mb-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
+                <div class="grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-0.5">
+                  <button v-for="p in filteredProjects" :key="p.id" @click="switchProject(p.id)" :disabled="switching"
                     class="flex items-center gap-2 px-2 py-1.5 rounded-lg border text-left transition"
                     :class="p.id === auth.user?.current_project?.id ? 'border-airr-300 bg-airr-50' : 'border-slate-100 hover:bg-slate-50'">
                     <ProjectAvatar :name="p.name" :code="p.code" :color="p.color" :size="24" />
@@ -222,9 +204,8 @@ async function logout() {
                       <span class="block text-[10px] text-slate-400">{{ p.reports_count }} rpt</span>
                     </span>
                   </button>
-                  <p v-if="!allProjects.length" class="col-span-2 text-xs text-slate-400 px-1">No projects assigned.</p>
+                  <p v-if="!filteredProjects.length" class="col-span-2 text-xs text-slate-400 px-1 py-1">{{ allProjects.length ? 'No match.' : 'No projects assigned.' }}</p>
                 </div>
-
                 <p class="text-[11px] text-slate-400 mt-2">Default scope for authoring. Set here.</p>
               </div>
 
