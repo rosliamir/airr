@@ -41,6 +41,25 @@ class MenuTest extends TestCase
         $this->assertCount(0, $res->json('data'));
     }
 
+    public function test_nav_filters_by_user_type(): void
+    {
+        \App\Models\Menu::create(['label' => 'Admins only', 'route' => 'x', 'user_types' => ['system_admin', 'admin'], 'sort' => 0]);
+        $this->actingWithPermissions([]); // a plain 'user' type (factory default in helper)
+
+        $res = $this->getJson('/api/menus/nav')->assertOk();
+        $this->assertFalse(collect($res->json('data'))->pluck('label')->contains('Admins only'));
+    }
+
+    public function test_nav_exposes_auto_collapse(): void
+    {
+        \App\Models\Menu::create(['label' => 'Studio', 'route' => 'reports', 'auto_collapse' => true, 'sort' => 0]);
+        $this->actingWithPermissions([]);
+
+        $res = $this->getJson('/api/menus/nav')->assertOk();
+        $item = collect($res->json('data'))->firstWhere('label', 'Studio');
+        $this->assertTrue($item['auto_collapse']);
+    }
+
     public function test_crud_requires_menus_manage(): void
     {
         $this->actingWithPermissions([]); // no menus.manage

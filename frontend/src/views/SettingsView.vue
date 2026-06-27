@@ -22,7 +22,14 @@ type AiConfig = {
 }
 type AiHealth = { provider: string; reachable: boolean; models: { name: string }[] }
 
-const tab = ref<'regional' | 'ai' | 'subscription' | 'about'>('regional')
+const tab = ref<'regional' | 'access' | 'ai' | 'subscription' | 'about'>('regional')
+
+// User types reference (used for menu access gating). Fixed enum.
+const USER_TYPES = [
+  { value: 'system_admin', label: 'System Administrator', desc: 'Platform owner — unrestricted; sees every module & menu.' },
+  { value: 'admin', label: 'Administrator', desc: 'Full operational access across modules.' },
+  { value: 'user', label: 'User', desc: 'Standard user — access scoped by roles, permissions & menu user-type gating.' },
+]
 const data = ref<Settings | null>(null)
 const loading = ref(true)
 const saving = ref(false)
@@ -146,7 +153,7 @@ onMounted(() => {
   <AdminLayout>
     <div class="space-y-5">
       <div class="flex gap-6 border-b border-slate-200">
-        <button v-for="t in (['regional', 'ai', 'subscription', 'about'] as const)" :key="t" @click="tab = t"
+        <button v-for="t in (['regional', 'access', 'ai', 'subscription', 'about'] as const)" :key="t" @click="tab = t"
           class="pb-2.5 text-sm font-medium border-b-2 -mb-px transition capitalize"
           :class="tab === t ? 'border-airr-500 text-airr-600' : 'border-transparent text-slate-500 hover:text-slate-700'">
           {{ t === 'ai' ? 'AI / Models' : t }}
@@ -170,6 +177,23 @@ onMounted(() => {
             {{ saving ? 'Saving…' : 'Save changes' }}
           </button>
           <span v-if="saved" class="text-sm text-emerald-600">✓ Saved</span>
+        </div>
+      </div>
+
+      <!-- ACCESS (user types) -->
+      <div v-else-if="tab === 'access'" class="bg-white rounded-xl border border-slate-100 p-6 max-w-2xl space-y-3">
+        <div>
+          <h3 class="font-semibold text-slate-700">User types</h3>
+          <p class="text-xs text-slate-400">Assigned per user. Menu items can be restricted to specific user types (Menu → Edit → User types with access).</p>
+        </div>
+        <div class="divide-y divide-slate-50">
+          <div v-for="ut in USER_TYPES" :key="ut.value" class="py-3 flex items-start gap-3">
+            <span class="text-[10px] uppercase font-medium bg-slate-100 text-slate-500 rounded px-2 py-1 mt-0.5 whitespace-nowrap">{{ ut.value }}</span>
+            <div>
+              <div class="text-sm font-medium text-slate-700">{{ ut.label }}</div>
+              <div class="text-xs text-slate-500">{{ ut.desc }}</div>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -10,12 +10,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Menu extends Model
 {
     protected $fillable = [
-        'parent_id', 'label', 'route', 'icon', 'module', 'permission', 'feature', 'sort', 'is_active',
+        'parent_id', 'label', 'route', 'icon', 'module', 'permission', 'feature',
+        'user_types', 'sort', 'is_active', 'auto_collapse',
     ];
 
     protected function casts(): array
     {
-        return ['is_active' => 'boolean', 'sort' => 'integer'];
+        return [
+            'is_active' => 'boolean', 'sort' => 'integer',
+            'user_types' => 'array', 'auto_collapse' => 'boolean',
+        ];
     }
 
     public function parent(): BelongsTo

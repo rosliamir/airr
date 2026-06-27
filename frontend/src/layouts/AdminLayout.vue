@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import * as icons from 'lucide-vue-next'
 import { adminMenu, type MenuItem } from '../config/admin-menu'
 import { apiRequest } from '../api/client'
@@ -12,6 +12,20 @@ import ProjectAvatar from '../components/ProjectAvatar.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+
+// Sidebar collapse (icon-only). Persisted; some menu items auto-collapse (authoring).
+const collapsed = ref(false)
+try { collapsed.value = localStorage.getItem('airr-sidebar-collapsed') === '1' } catch { /* ignore */ }
+function toggleCollapsed() {
+  collapsed.value = !collapsed.value
+  try { localStorage.setItem('airr-sidebar-collapsed', collapsed.value ? '1' : '0') } catch { /* ignore */ }
+}
+const autoCollapseRoutes = ref<Set<string>>(new Set())
+// Auto-minimise when navigating to an authoring item flagged auto_collapse.
+watch(() => route.name, (name) => {
+  if (name && autoCollapseRoutes.value.has(String(name))) collapsed.value = true
+})
 
 // User dropdown (top-right) + current-project switch + theme.
 const menuOpen = ref(false)
@@ -58,11 +72,15 @@ const staticGroups = computed<NavGroup[]>(() =>
 const apiGroups = ref<NavGroup[] | null>(null)
 const groups = computed<NavGroup[]>(() => apiGroups.value ?? staticGroups.value)
 
-type NavNode = { label: string; route: string | null; icon?: string; children?: NavNode[] }
+type NavNode = { label: string; route: string | null; icon?: string; auto_collapse?: boolean; children?: NavNode[] }
 onMounted(async () => {
   try {
     const tree = (await apiRequest<{ data: NavNode[] }>('/menus/nav')).data
     if (tree.length) {
+      const collapseSet = new Set<string>()
+      const note = (n: NavNode) => { if (n.route && n.auto_collapse) collapseSet.add(n.route) }
+      tree.forEach((n) => { note(n); (n.children ?? []).forEach(note) })
+      autoCollapseRoutes.value = collapseSet
       apiGroups.value = tree.map((n) =>
         n.route
           ? { title: null, items: [{ label: n.label, route: n.route, icon: n.icon }] }
@@ -81,10 +99,10 @@ async function logout() {
 <template>
   <div class="min-h-screen flex bg-slate-50">
     <!-- Sidebar -->
-    <aside class="w-64 shrink-0 bg-white border-r border-slate-200 flex flex-col">
-      <div class="h-16 flex items-center gap-2.5 px-5 border-b border-slate-100">
+    <aside class="shrink-0 bg-white border-r border-slate-200 flex flex-col transition-all duration-200" :class="collapsed ? 'w-16' : 'w-64'">
+      <div class="h-16 flex items-center border-b border-slate-100" :class="collapsed ? 'justify-center px-0' : 'gap-2.5 px-5'">
         <AirrLogo :size="30" />
-        <div>
+        <div v-if="!collapsed">
           <div class="font-bold leading-none">AIRR</div>
           <div class="text-[9px] text-slate-400 uppercase tracking-widest">Studio</div>
         </div>
@@ -92,22 +110,32 @@ async function logout() {
 
       <nav class="flex-1 overflow-y-auto py-3 px-2 space-y-4">
         <div v-for="(group, gi) in groups" :key="gi">
-          <p v-if="group.title" class="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          <p v-if="group.title && !collapsed" class="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
             {{ group.title }}
           </p>
+          <div v-else-if="group.title && collapsed" class="border-t border-slate-100 my-2 mx-2"></div>
           <RouterLink
             v-for="item in group.items"
             :key="item.route ?? item.label"
             :to="{ name: item.route ?? 'dashboard' }"
-            class="group flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition"
+            :title="collapsed ? item.label : undefined"
+            class="group flex items-center rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition"
+            :class="collapsed ? 'justify-center px-2 py-2.5' : 'gap-2.5 px-3 py-2'"
             active-class="bg-airr-50 text-airr-700 font-medium"
           >
             <component :is="iconFor(item.icon)" :size="17" class="shrink-0" />
-            <span class="flex-1">{{ item.label }}</span>
+            <span v-if="!collapsed" class="flex-1">{{ item.label }}</span>
           </RouterLink>
         </div>
       </nav>
 
+      <!-- Collapse toggle -->
+      <button @click="toggleCollapsed" :title="collapsed ? 'Expand' : 'Collapse'"
+        class="h-10 border-t border-slate-100 flex items-center text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+        :class="collapsed ? 'justify-center' : 'justify-end px-4 gap-1.5'">
+        <span v-if="!collapsed" class="text-xs">Collapse</span>
+        <component :is="collapsed ? icons.PanelLeftOpen : icons.PanelLeftClose" :size="17" />
+      </button>
     </aside>
 
     <!-- Main -->

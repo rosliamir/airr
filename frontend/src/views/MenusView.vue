@@ -6,8 +6,14 @@ import { apiRequest, ApiException } from '../api/client'
 type Menu = {
   id: number; parent_id: number | null; label: string; route: string | null
   icon: string | null; module: string | null; permission: string | null
-  feature: string | null; sort: number; is_active: boolean
+  feature: string | null; user_types: string[]; sort: number; is_active: boolean; auto_collapse: boolean
 }
+
+const USER_TYPES = [
+  { value: 'system_admin', label: 'System Admin' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'user', label: 'User' },
+]
 
 const menus = ref<Menu[]>([])
 const loading = ref(true)
@@ -31,8 +37,14 @@ const ordered = computed(() => {
 const showForm = ref(false)
 const editing = ref<Menu | null>(null)
 const blank = (): Omit<Menu, 'id'> => ({
-  parent_id: null, label: '', route: '', icon: '', module: '', permission: '', feature: '', sort: 0, is_active: true,
+  parent_id: null, label: '', route: '', icon: '', module: '', permission: '', feature: '',
+  user_types: [], sort: 0, is_active: true, auto_collapse: false,
 })
+function toggleType(t: string) {
+  form.value.user_types = form.value.user_types.includes(t)
+    ? form.value.user_types.filter((x) => x !== t)
+    : [...form.value.user_types, t]
+}
 const form = ref<Omit<Menu, 'id'>>(blank())
 
 async function load() {
@@ -50,7 +62,7 @@ async function load() {
 function openCreate() { editing.value = null; form.value = blank(); showForm.value = true }
 function openEdit(m: Menu) {
   editing.value = m
-  form.value = { ...m, route: m.route ?? '', icon: m.icon ?? '', module: m.module ?? '', permission: m.permission ?? '', feature: m.feature ?? '' }
+  form.value = { ...m, route: m.route ?? '', icon: m.icon ?? '', module: m.module ?? '', permission: m.permission ?? '', feature: m.feature ?? '', user_types: [...(m.user_types ?? [])] }
   showForm.value = true
 }
 
@@ -173,8 +185,20 @@ onMounted(load)
             <label class="block text-xs font-medium text-slate-500 mb-1">Sort</label>
             <input v-model.number="form.sort" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
           </div>
-          <label class="col-span-2 flex items-center gap-2 text-sm text-slate-600">
+          <div class="col-span-2">
+            <label class="block text-xs font-medium text-slate-500 mb-1">User types with access <span class="text-slate-300">(none = all types)</span></label>
+            <div class="flex gap-4">
+              <label v-for="t in USER_TYPES" :key="t.value" class="flex items-center gap-1.5 text-sm text-slate-600">
+                <input type="checkbox" :checked="form.user_types.includes(t.value)" @change="toggleType(t.value)" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" />
+                {{ t.label }}
+              </label>
+            </div>
+          </div>
+          <label class="flex items-center gap-2 text-sm text-slate-600">
             <input type="checkbox" v-model="form.is_active" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" /> Active
+          </label>
+          <label class="flex items-center gap-2 text-sm text-slate-600" title="Minimise the sidebar to icons when this item is active (authoring)">
+            <input type="checkbox" v-model="form.auto_collapse" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" /> Auto-collapse sidebar
           </label>
         </div>
         <div class="flex justify-end gap-2 pt-1">

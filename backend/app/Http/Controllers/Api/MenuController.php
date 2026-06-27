@@ -77,10 +77,17 @@ class MenuController extends Controller
 
     private function canSee(Menu $m, User $user): bool
     {
-        if ($m->permission && ! $user->seesEverything() && ! $user->hasPermission($m->permission)) {
+        if ($m->feature && ! Edition::allows($m->feature)) {
             return false;
         }
-        if ($m->feature && ! Edition::allows($m->feature)) {
+        // Admins (seesEverything) bypass permission & user-type gates.
+        if ($user->seesEverything()) {
+            return true;
+        }
+        if ($m->permission && ! $user->hasPermission($m->permission)) {
+            return false;
+        }
+        if (! empty($m->user_types) && ! in_array($user->user_type, $m->user_types, true)) {
             return false;
         }
 
@@ -97,25 +104,30 @@ class MenuController extends Controller
             'module'     => 'nullable|string|max:10',
             'permission' => 'nullable|string|max:60',
             'feature'    => 'nullable|string|max:60',
-            'sort'       => 'nullable|integer',
-            'is_active'  => 'nullable|boolean',
+            'user_types'   => 'nullable|array',
+            'user_types.*' => ['string', \Illuminate\Validation\Rule::in(\App\Models\User::USER_TYPES)],
+            'sort'         => 'nullable|integer',
+            'is_active'    => 'nullable|boolean',
+            'auto_collapse' => 'nullable|boolean',
         ]);
     }
 
     private function node(Menu $m, bool $admin = false): array
     {
         $base = [
-            'id'     => $m->id,
-            'label'  => $m->label,
-            'route'  => $m->route,
-            'icon'   => $m->icon,
-            'module' => $m->module,
+            'id'            => $m->id,
+            'label'         => $m->label,
+            'route'         => $m->route,
+            'icon'          => $m->icon,
+            'module'        => $m->module,
+            'auto_collapse' => (bool) $m->auto_collapse,
         ];
         if ($admin) {
             $base += [
                 'parent_id'  => $m->parent_id,
                 'permission' => $m->permission,
                 'feature'    => $m->feature,
+                'user_types' => $m->user_types ?? [],
                 'sort'       => $m->sort,
                 'is_active'  => $m->is_active,
             ];
