@@ -6,8 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
-// FR-M14: a project groups reports and scopes access. Members = direct users
-// plus whole user groups.
+// FR-M14: a project groups reports and scopes access. Members = direct users.
 class Project extends Model
 {
     const STATUS_ACTIVE = 'active';
@@ -29,29 +28,20 @@ class Project extends Model
         return $this->belongsToMany(User::class);
     }
 
-    public function groups(): BelongsToMany
-    {
-        return $this->belongsToMany(UserGroup::class, 'project_user_group');
-    }
-
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
     }
 
     /**
-     * Owner+membership visibility (FR-M14.3): projects the viewer created, is a
-     * direct member of, or whose assigned group the viewer belongs to. Caller
-     * checks $viewer->seesEverything() first to bypass.
+     * Owner+membership visibility (FR-M14.3): projects the viewer created or is a
+     * direct member of. Caller checks $viewer->seesEverything() first to bypass.
      */
     public function scopeVisibleTo($query, User $viewer)
     {
         return $query->where(function ($q) use ($viewer) {
             $q->where('created_by', $viewer->id)
                 ->orWhereHas('users', fn ($u) => $u->where('users.id', $viewer->id));
-            if ($viewer->user_group_id) {
-                $q->orWhereHas('groups', fn ($g) => $g->where('user_groups.id', $viewer->user_group_id));
-            }
         });
     }
 }

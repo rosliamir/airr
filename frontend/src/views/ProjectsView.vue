@@ -19,9 +19,7 @@ type Project = {
   ai_config: { provider?: string; models?: Record<string, string> } | null
   creator: { id: number; name: string } | null
   users_count: number
-  groups_count: number
   users?: Member[]
-  groups?: { id: number; name: string }[]
 }
 
 // Palette for project colour-coding.
@@ -43,7 +41,6 @@ const canManage = auth.can('projects.manage')
 
 const projects = ref<Project[]>([])
 const allUsers = ref<Member[]>([])
-const allGroups = ref<{ id: number; name: string }[]>([])
 const loading = ref(true)
 const error = ref('')
 const busy = ref(false)
@@ -64,7 +61,7 @@ const editing = ref<Project | null>(null)
 const form = ref({
   code: '', name: '', customer_name: '', type: '', color: '', status: 'active',
   start_date: '', end_date: '', description: '',
-  users: [] as number[], groups: [] as number[],
+  users: [] as number[],
   ai_models: {} as Record<string, string>,
 })
 
@@ -75,34 +72,28 @@ const AI_TASK_LABELS: Record<string, string> = {
   embedding: 'Embedding', generation: 'Generation', reasoning: 'Reasoning', audit: 'Audit',
 }
 
-// Member/group pick search.
+// Member pick search.
 const userSearch = ref('')
-const groupSearch = ref('')
 const filteredUsers = computed(() =>
   allUsers.value.filter((u) => u.name.toLowerCase().includes(userSearch.value.toLowerCase())),
-)
-const filteredGroups = computed(() =>
-  allGroups.value.filter((g) => g.name.toLowerCase().includes(groupSearch.value.toLowerCase())),
 )
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const reqs: [Promise<{ data: Project[] }>, Promise<{ data: Member[] }>?, Promise<{ data: { id: number; name: string }[] }>?] = [
+    const reqs: [Promise<{ data: Project[] }>, Promise<{ data: Member[] }>?] = [
       apiRequest<{ data: Project[] }>('/projects'),
     ]
-    // Member pickers need users.manage; degrade gracefully if not held.
+    // Member picker needs users.manage; degrade gracefully if not held.
     if (auth.can('users.manage')) {
       reqs[1] = apiRequest<{ data: Member[] }>('/users?limit=100')
-      reqs[2] = apiRequest<{ data: { id: number; name: string }[] }>('/user-groups')
     }
-    const [p, u, g] = await Promise.all(reqs as Promise<unknown>[]) as [
-      { data: Project[] }, { data: Member[] }?, { data: { id: number; name: string }[] }?,
+    const [p, u] = await Promise.all(reqs as Promise<unknown>[]) as [
+      { data: Project[] }, { data: Member[] }?,
     ]
     projects.value = p.data
     allUsers.value = u?.data ?? []
-    allGroups.value = g?.data ?? []
   } catch (e) {
     error.value = e instanceof ApiException ? e.error.message : 'Failed to load projects'
   } finally {
@@ -112,12 +103,11 @@ async function load() {
 
 function resetSearch() {
   userSearch.value = ''
-  groupSearch.value = ''
 }
 async function openCreate() {
   editing.value = null
   resetSearch()
-  form.value = { code: '', name: '', customer_name: '', type: '', color: '', status: 'active', start_date: '', end_date: '', description: '', users: [], groups: [], ai_models: {} }
+  form.value = { code: '', name: '', customer_name: '', type: '', color: '', status: 'active', start_date: '', end_date: '', description: '', users: [], ai_models: {} }
   showForm.value = true
 }
 async function openEdit(p: Project) {
@@ -130,13 +120,11 @@ async function openEdit(p: Project) {
     code: d.code, name: d.name, customer_name: d.customer_name ?? '', type: d.type ?? '',
     color: d.color ?? '', status: d.status,
     start_date: d.start_date ?? '', end_date: d.end_date ?? '', description: d.description ?? '',
-    users: (d.users ?? []).map((m) => m.id),
-    groups: (d.groups ?? []).map((m) => m.id),
-    ai_models: { ...(d.ai_config?.models ?? {}) },
+    users: (d.users ?? []).map((m) => m.id),    ai_models: { ...(d.ai_config?.models ?? {}) },
   }
   showForm.value = true
 }
-function toggle(list: 'users' | 'groups', id: number) {
+function toggle(list: 'users', id: number) {
   const arr = form.value[list]
   form.value[list] = arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]
 }
@@ -193,7 +181,7 @@ onMounted(() => {
   <AdminLayout>
     <div class="space-y-4">
       <div class="flex items-center justify-between">
-        <p class="text-sm text-slate-500">Projects scope access and store reports. Assign users and groups for membership.</p>
+        <p class="text-sm text-slate-500">Projects scope access and store reports. Assign users for membership.</p>
         <button v-if="canManage" @click="openCreate" class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5">+ New Project</button>
       </div>
 
@@ -220,7 +208,7 @@ onMounted(() => {
           <div class="text-xs text-slate-400">
             {{ p.start_date ?? '—' }} → {{ p.end_date ?? '—' }}
           </div>
-          <div class="text-xs text-slate-500">{{ p.users_count }} users · {{ p.groups_count }} groups</div>
+          <div class="text-xs text-slate-500">{{ p.users_count }} users</div>
           <div v-if="canManage" class="flex gap-3 pt-1 mt-auto">
             <button @click="openEdit(p)" class="text-xs text-airr-600 hover:underline">Edit</button>
             <button @click="remove(p)" :disabled="busy" class="text-xs text-rose-600 hover:underline">Delete</button>
@@ -313,17 +301,6 @@ onMounted(() => {
                 <span>{{ u.name }}</span>
               </label>
               <span v-if="!filteredUsers.length" class="text-xs text-slate-400">{{ allUsers.length ? 'No match.' : 'No users available.' }}</span>
-            </div>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-600 mb-1">Member groups <span class="text-slate-400 font-normal">· {{ form.groups.length }} selected</span></label>
-            <input v-model="groupSearch" type="search" placeholder="Search groups…" class="w-full mb-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
-            <div class="max-h-32 overflow-y-auto border border-slate-100 rounded-lg p-2 space-y-1">
-              <label v-for="g in filteredGroups" :key="g.id" class="flex items-center gap-2 text-sm">
-                <input type="checkbox" :checked="form.groups.includes(g.id)" @change="toggle('groups', g.id)" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" />
-                <span>{{ g.name }}</span>
-              </label>
-              <span v-if="!filteredGroups.length" class="text-xs text-slate-400">{{ allGroups.length ? 'No match.' : 'No groups available.' }}</span>
             </div>
           </div>
         </div>

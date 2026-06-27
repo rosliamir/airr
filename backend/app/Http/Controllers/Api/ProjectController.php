@@ -20,7 +20,7 @@ class ProjectController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $query = Project::query()->withCount(['users', 'groups'])->with('creator:id,name');
+        $query = Project::query()->withCount(['users'])->with('creator:id,name');
 
         // Owner+membership scoping — admins see everything.
         $viewer = $request->user();
@@ -40,7 +40,7 @@ class ProjectController extends Controller
 
     public function show(Project $project): JsonResponse
     {
-        return $this->sendOk($this->row($project->load(['users:id,name,email', 'groups:id,name', 'creator:id,name'])));
+        return $this->sendOk($this->row($project->load(['users:id,name,email', 'creator:id,name'])));
     }
 
     public function store(Request $request): JsonResponse
@@ -50,7 +50,7 @@ class ProjectController extends Controller
         $this->syncMembers($project, $request);
         $this->audit->log('project.created', Project::class, $project->id, null, $data);
 
-        return $this->sendCreated($this->row($project->load(['users:id,name,email', 'groups:id,name', 'creator:id,name'])));
+        return $this->sendCreated($this->row($project->load(['users:id,name,email', 'creator:id,name'])));
     }
 
     public function update(Request $request, Project $project): JsonResponse
@@ -60,7 +60,7 @@ class ProjectController extends Controller
         $this->syncMembers($project, $request);
         $this->audit->log('project.updated', Project::class, $project->id, null, $data);
 
-        return $this->sendOk($this->row($project->load(['users:id,name,email', 'groups:id,name', 'creator:id,name'])));
+        return $this->sendOk($this->row($project->load(['users:id,name,email', 'creator:id,name'])));
     }
 
     public function destroy(Project $project): JsonResponse
@@ -99,14 +99,9 @@ class ProjectController extends Controller
         $request->validate([
             'users'    => 'array',
             'users.*'  => 'integer|exists:users,id',
-            'groups'   => 'array',
-            'groups.*' => 'integer|exists:user_groups,id',
         ]);
         if ($request->has('users')) {
             $project->users()->sync($request->input('users', []));
-        }
-        if ($request->has('groups')) {
-            $project->groups()->sync($request->input('groups', []));
         }
     }
 
@@ -126,10 +121,8 @@ class ProjectController extends Controller
             'ai_config'   => $p->ai_config,
             'creator'     => $p->creator ? ['id' => $p->creator->id, 'name' => $p->creator->name] : null,
             'users_count' => $p->users_count ?? $p->users()->count(),
-            'groups_count' => $p->groups_count ?? $p->groups()->count(),
             // Detail-only (present when loaded):
             'users'  => $p->relationLoaded('users') ? $p->users->map(fn ($u) => ['id' => $u->id, 'name' => $u->name, 'email' => $u->email]) : null,
-            'groups' => $p->relationLoaded('groups') ? $p->groups->map(fn ($g) => ['id' => $g->id, 'name' => $g->name]) : null,
         ];
     }
 }

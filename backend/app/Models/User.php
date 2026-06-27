@@ -13,7 +13,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password', 'status', 'user_type', 'user_group_id', 'created_by', 'auth_provider', 'google_id', 'avatar_url'])]
+#[Fillable(['name', 'email', 'password', 'status', 'user_type', 'created_by', 'auth_provider', 'google_id', 'avatar_url'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -43,11 +43,6 @@ class User extends Authenticatable
             || $this->roles()->where('slug', 'superadmin')->exists();
     }
 
-    public function group(): BelongsTo
-    {
-        return $this->belongsTo(UserGroup::class, 'user_group_id');
-    }
-
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
@@ -59,17 +54,14 @@ class User extends Authenticatable
     }
 
     /**
-     * Owner+group visibility scope (FR-M14.3): limit a user query to accounts
-     * the viewer created OR that share the viewer's group. Exempt accounts are
-     * not scoped (caller checks seesEverything() first).
+     * Owner visibility scope (FR-M14.3): limit a user query to accounts the
+     * viewer created or the viewer themselves. Exempt accounts are not scoped
+     * (caller checks seesEverything() first).
      */
     public function scopeVisibleTo($query, User $viewer)
     {
         return $query->where(function ($q) use ($viewer) {
             $q->where('created_by', $viewer->id)->orWhere('id', $viewer->id);
-            if ($viewer->user_group_id) {
-                $q->orWhere('user_group_id', $viewer->user_group_id);
-            }
         });
     }
 

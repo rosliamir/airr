@@ -3,13 +3,11 @@ import { ref } from 'vue'
 import AdminLayout from '../layouts/AdminLayout.vue'
 import UsersTab from '../components/users/UsersTab.vue'
 import RolesTab from '../components/users/RolesTab.vue'
-import GroupsTab from '../components/users/GroupsTab.vue'
 
-const tab = ref<'users' | 'roles' | 'groups'>('users')
+const tab = ref<'users' | 'roles'>('users')
 const tabs = [
   { key: 'users', label: 'Users' },
   { key: 'roles', label: 'Roles' },
-  { key: 'groups', label: 'Groups' },
 ] as const
 </script>
 
@@ -27,7 +25,6 @@ const tabs = [
 
       <UsersTab v-if="tab === 'users'" />
       <RolesTab v-else-if="tab === 'roles'" />
-      <GroupsTab v-else />
     </div>
   </AdminLayout>
 </template>

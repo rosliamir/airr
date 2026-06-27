@@ -4,14 +4,12 @@ import { apiRequest, ApiException, uploadFile } from '../../api/client'
 import UserAvatar from '../UserAvatar.vue'
 
 type Role = { id: number; slug: string; name: string }
-type Group = { id: number; name: string }
 type UserRow = {
   id: number
   name: string
   email: string
   status: 'pending' | 'active' | 'suspended'
   user_type: 'system_admin' | 'admin' | 'user'
-  group: { id: number; name: string } | null
   auth_provider: string
   avatar_url: string | null
   roles: Role[]
@@ -20,7 +18,6 @@ type UserRow = {
 
 const users = ref<UserRow[]>([])
 const roles = ref<Role[]>([])
-const groups = ref<Group[]>([])
 const loading = ref(true)
 const error = ref('')
 const busy = ref(false)
@@ -40,21 +37,19 @@ const showForm = ref(false)
 const editing = ref<UserRow | null>(null)
 const form = ref({
   name: '', email: '', password: '', user_type: 'user',
-  status: 'active', user_group_id: null as number | null, roles: [] as number[],
+  status: 'active', roles: [] as number[],
 })
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [u, r, g] = await Promise.all([
+    const [u, r] = await Promise.all([
       apiRequest<{ data: UserRow[] }>('/users?limit=100'),
       apiRequest<{ data: Role[] }>('/roles'),
-      apiRequest<{ data: Group[] }>('/user-groups'),
     ])
     users.value = u.data
     roles.value = r.data
-    groups.value = g.data
   } catch (e) {
     error.value = e instanceof ApiException ? e.error.message : 'Failed to load users'
   } finally {
@@ -64,14 +59,14 @@ async function load() {
 
 function openCreate() {
   editing.value = null
-  form.value = { name: '', email: '', password: '', user_type: 'user', status: 'active', user_group_id: null, roles: [] }
+  form.value = { name: '', email: '', password: '', user_type: 'user', status: 'active', roles: [] }
   showForm.value = true
 }
 function openEdit(u: UserRow) {
   editing.value = u
   form.value = {
     name: u.name, email: u.email, password: '', user_type: u.user_type,
-    status: u.status, user_group_id: u.group?.id ?? null, roles: u.roles.map((r) => r.id),
+    status: u.status, roles: u.roles.map((r) => r.id),
   }
   showForm.value = true
 }
@@ -87,7 +82,7 @@ async function save() {
   try {
     const body: Record<string, unknown> = {
       name: form.value.name, email: form.value.email, user_type: form.value.user_type,
-      status: form.value.status, user_group_id: form.value.user_group_id, roles: form.value.roles,
+      status: form.value.status, roles: form.value.roles,
     }
     if (form.value.password) body.password = form.value.password
     const path = editing.value ? `/users/${editing.value.id}` : '/users'
@@ -174,15 +169,14 @@ onMounted(load)
           <tr>
             <th class="px-4 py-3 font-medium">User</th>
             <th class="px-4 py-3 font-medium">Type</th>
-            <th class="px-4 py-3 font-medium">Group</th>
             <th class="px-4 py-3 font-medium">Roles</th>
             <th class="px-4 py-3 font-medium">Status</th>
             <th class="px-4 py-3 font-medium text-right">Actions</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
-          <tr v-if="loading"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Loading…</td></tr>
-          <tr v-else-if="!filtered.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">No users.</td></tr>
+          <tr v-if="loading"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Loading…</td></tr>
+          <tr v-else-if="!filtered.length"><td colspan="5" class="px-4 py-8 text-center text-slate-400">No users.</td></tr>
           <tr v-for="u in filtered" :key="u.id" class="hover:bg-slate-50 align-top">
             <td class="px-4 py-3">
               <div class="flex items-center gap-3">
@@ -195,7 +189,6 @@ onMounted(load)
               </div>
             </td>
             <td class="px-4 py-3 text-slate-600">{{ typeLabel(u.user_type) }}</td>
-            <td class="px-4 py-3 text-slate-500">{{ u.group?.name ?? '—' }}</td>
             <td class="px-4 py-3">
               <div class="flex flex-wrap gap-1">
                 <span v-for="r in u.roles" :key="r.id" class="text-xs bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">{{ r.name }}</span>
@@ -263,13 +256,6 @@ onMounted(load)
               <option value="active">Active</option>
               <option value="pending">Pending</option>
               <option value="suspended">Suspended</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-600 mb-1">Group</label>
-            <select v-model="form.user_group_id" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none">
-              <option :value="null">— None —</option>
-              <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
             </select>
           </div>
         </div>

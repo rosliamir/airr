@@ -29,9 +29,9 @@ class UserController extends Controller
         $status = $request->input('status');
         $q      = $request->input('q');
 
-        $query = User::query()->with(['roles:id,slug,name', 'group:id,name']);
+        $query = User::query()->with(['roles:id,slug,name']);
 
-        // Owner+group visibility scoping (FR-M14.3) — admins see everything.
+        // Owner visibility scoping (FR-M14.3) — admins see everything.
         if (! $request->user()->seesEverything()) {
             $query->visibleTo($request->user());
         }
@@ -67,9 +67,7 @@ class UserController extends Controller
             'email'         => 'required|email|max:190|unique:users,email',
             'password'      => ['required', 'string', Password::min(8)],
             'user_type'     => ['required', Rule::in(User::USER_TYPES)],
-            'status'        => ['nullable', Rule::in([User::STATUS_ACTIVE, User::STATUS_PENDING, User::STATUS_SUSPENDED])],
-            'user_group_id' => 'nullable|integer|exists:user_groups,id',
-            'roles'         => 'array',
+            'status'        => ['nullable', Rule::in([User::STATUS_ACTIVE, User::STATUS_PENDING, User::STATUS_SUSPENDED])],            'roles'         => 'array',
             'roles.*'       => 'integer|exists:roles,id',
         ]);
 
@@ -78,19 +76,17 @@ class UserController extends Controller
             'email'         => $data['email'],
             'password'      => $data['password'],
             'user_type'     => $data['user_type'],
-            'status'        => $data['status'] ?? User::STATUS_ACTIVE,
-            'user_group_id' => $data['user_group_id'] ?? null,
-            'created_by'    => $request->user()->id, // ownership for visibility scoping
+            'status'        => $data['status'] ?? User::STATUS_ACTIVE,            'created_by'    => $request->user()->id, // ownership for visibility scoping
             'auth_provider' => 'local',
         ]);
         $user->roles()->sync($data['roles'] ?? []);
 
         $this->audit->log('user.created', User::class, $user->id, null, ['email' => $user->email, 'user_type' => $user->user_type]);
 
-        return $this->sendCreated($this->row($user->fresh(['roles', 'group'])));
+        return $this->sendCreated($this->row($user->fresh(['roles'])));
     }
 
-    // Edit a user (profile, type, group, status, roles; password optional).
+    // Edit a user (profile, type, status, roles; password optional).
     public function update(Request $request, User $user): JsonResponse
     {
         $data = $request->validate([
@@ -98,9 +94,7 @@ class UserController extends Controller
             'email'         => ['sometimes', 'email', 'max:190', Rule::unique('users', 'email')->ignore($user->id)],
             'password'      => ['nullable', 'string', Password::min(8)],
             'user_type'     => ['sometimes', Rule::in(User::USER_TYPES)],
-            'status'        => ['sometimes', Rule::in([User::STATUS_ACTIVE, User::STATUS_PENDING, User::STATUS_SUSPENDED])],
-            'user_group_id' => 'nullable|integer|exists:user_groups,id',
-            'roles'         => 'sometimes|array',
+            'status'        => ['sometimes', Rule::in([User::STATUS_ACTIVE, User::STATUS_PENDING, User::STATUS_SUSPENDED])],            'roles'         => 'sometimes|array',
             'roles.*'       => 'integer|exists:roles,id',
         ]);
 
@@ -120,7 +114,7 @@ class UserController extends Controller
 
         $this->audit->log('user.updated', User::class, $user->id, null, collect($data)->except('password')->all());
 
-        return $this->sendOk($this->row($user->fresh(['roles', 'group'])));
+        return $this->sendOk($this->row($user->fresh(['roles'])));
     }
 
     // Delete a user. Cannot delete yourself.
@@ -210,7 +204,7 @@ class UserController extends Controller
         $user->update(['avatar_url' => Storage::disk('public')->url($path)]);
         $this->audit->log('user.avatar_updated', User::class, $user->id);
 
-        return $this->sendOk($this->row($user->fresh(['roles', 'group'])));
+        return $this->sendOk($this->row($user->fresh(['roles'])));
     }
 
     private function row(User $u): array
@@ -220,9 +214,7 @@ class UserController extends Controller
             'name'          => $u->name,
             'email'         => $u->email,
             'status'        => $u->status,
-            'user_type'     => $u->user_type,
-            'group'         => $u->group ? ['id' => $u->group->id, 'name' => $u->group->name] : null,
-            'auth_provider' => $u->auth_provider,
+            'user_type'     => $u->user_type,            'auth_provider' => $u->auth_provider,
             'avatar_url'    => $u->avatar_url,
             'roles'         => $u->roles->map(fn (Role $r) => ['id' => $r->id, 'slug' => $r->slug, 'name' => $r->name]),
             'clearance'     => $u->clearance(),

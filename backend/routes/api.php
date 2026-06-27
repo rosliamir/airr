@@ -14,7 +14,6 @@ use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\SystemController;
 use App\Http\Controllers\Api\UserController;
-use App\Http\Controllers\Api\UserGroupController;
 use Illuminate\Support\Facades\Route;
 
 // All AIRR API routes live here (single route-file policy).
@@ -42,7 +41,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // M1.5 — audit trail (read gated)
     Route::get('audit', [AuditController::class, 'index'])->middleware('permission:audit.read');
 
-    // M14 — user administration + groups (gated by users.manage)
+    // M14 — user administration (gated by users.manage)
     Route::middleware('permission:users.manage')->group(function () {
         Route::get('users', [UserController::class, 'index']);
         Route::post('users', [UserController::class, 'store']);
@@ -53,12 +52,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('users/{user}/suspend', [UserController::class, 'suspend']);
         Route::post('users/{user}/reactivate', [UserController::class, 'reactivate']);
         Route::post('users/{user}/avatar', [UserController::class, 'uploadAvatar']);
-
-        // User groups CRUD
-        Route::get('user-groups', [UserGroupController::class, 'index']);
-        Route::post('user-groups', [UserGroupController::class, 'store']);
-        Route::put('user-groups/{userGroup}', [UserGroupController::class, 'update']);
-        Route::delete('user-groups/{userGroup}', [UserGroupController::class, 'destroy']);
     });
 
     // M14 — role administration (gated by roles.manage)
