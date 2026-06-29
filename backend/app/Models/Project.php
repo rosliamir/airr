@@ -28,9 +28,11 @@ class Project extends Model
         return $this->belongsToMany(User::class);
     }
 
-    public function reports(): \Illuminate\Database\Eloquent\Relations\HasMany
+    // Many-to-many: reports linked/accessible to this project (a report may
+    // belong to several projects). reports.project_id remains the home project.
+    public function reports(): BelongsToMany
     {
-        return $this->hasMany(Report::class);
+        return $this->belongsToMany(Report::class, 'project_report')->withTimestamps();
     }
 
     public function creator(): BelongsTo

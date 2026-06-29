@@ -34,6 +34,12 @@ class Report extends Model
         return $this->belongsTo(Dataset::class);
     }
 
+    // Many-to-many: projects this report is linked to (FR-M6 — multi-project access).
+    public function projects(): BelongsToMany
+    {
+        return $this->belongsToMany(Project::class, 'project_report')->withTimestamps();
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');

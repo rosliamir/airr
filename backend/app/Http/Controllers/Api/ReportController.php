@@ -78,6 +78,9 @@ class ReportController extends Controller
             'created_by' => $request->user()->id,
         ]);
         $report->syncPermissions($data['permissions'] ?? []);
+        if (! empty($data['project_id'])) {
+            $report->projects()->syncWithoutDetaching([$data['project_id']]); // link to home project
+        }
         $this->audit->log('report.created', Report::class, $report->id, null, ['name' => $report->name]);
 
         return $this->sendCreated($this->row($report->fresh(['project', 'dataset', 'roles'])));

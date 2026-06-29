@@ -162,5 +162,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('projects', [ProjectController::class, 'store']);
         Route::put('projects/{project}', [ProjectController::class, 'update']);
         Route::delete('projects/{project}', [ProjectController::class, 'destroy']);
+        // Quick link management from the project card
+        Route::get('projects/{project}/report-links', [ProjectController::class, 'reportLinks']);
+        Route::put('projects/{project}/reports', [ProjectController::class, 'syncReports']);
+        Route::get('projects/{project}/user-links', [ProjectController::class, 'userLinks']);
+        Route::put('projects/{project}/users', [ProjectController::class, 'syncUsers']);
     });
 });

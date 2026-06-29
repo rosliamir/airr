@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Traits\ApiResponse;
 use App\Models\Project;
+use App\Models\Report;
+use App\Models\User;
 use App\Services\AuditService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -92,6 +94,46 @@ class ProjectController extends Controller
             'ai_config.models.reasoning'  => 'nullable|string|max:120',
             'ai_config.models.audit'      => 'nullable|string|max:120',
         ]);
+    }
+
+    // --- Quick link management from the project card (FR-M6/M14) ---
+
+    // Reports: all reports + which are linked to this project. A report can be
+    // linked to many projects.
+    public function reportLinks(Project $project): JsonResponse
+    {
+        return $this->sendOk([
+            'all'    => Report::orderBy('name')->get(['id', 'name', 'type'])
+                ->map(fn ($r) => ['id' => $r->id, 'name' => $r->name, 'type' => $r->type]),
+            'linked' => $project->reports()->pluck('reports.id'),
+        ]);
+    }
+
+    public function syncReports(Request $request, Project $project): JsonResponse
+    {
+        $data = $request->validate(['report_ids' => 'array', 'report_ids.*' => 'integer|exists:reports,id']);
+        $project->reports()->sync($data['report_ids'] ?? []);
+        $this->audit->log('project.reports_synced', Project::class, $project->id, null, ['count' => count($data['report_ids'] ?? [])]);
+
+        return $this->sendOk(['linked' => $project->reports()->pluck('reports.id')]);
+    }
+
+    public function userLinks(Project $project): JsonResponse
+    {
+        return $this->sendOk([
+            'all'    => User::orderBy('name')->get(['id', 'name', 'email'])
+                ->map(fn ($u) => ['id' => $u->id, 'name' => $u->name, 'email' => $u->email]),
+            'linked' => $project->users()->pluck('users.id'),
+        ]);
+    }
+
+    public function syncUsers(Request $request, Project $project): JsonResponse
+    {
+        $data = $request->validate(['user_ids' => 'array', 'user_ids.*' => 'integer|exists:users,id']);
+        $project->users()->sync($data['user_ids'] ?? []);
+        $this->audit->log('project.users_synced', Project::class, $project->id, null, ['count' => count($data['user_ids'] ?? [])]);
+
+        return $this->sendOk(['linked' => $project->users()->pluck('users.id')]);
     }
 
     private function syncMembers(Project $project, Request $request): void
