@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AiController;
+use App\Http\Controllers\Api\OrchestrationController;
 use App\Http\Controllers\Api\AuditController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DatasetController;
@@ -153,6 +154,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('permission:reports.edit')->group(function () {
         Route::put('reports/{report}', [ReportController::class, 'update']);
         Route::delete('reports/{report}', [ReportController::class, 'destroy']);
+    });
+
+    // M4 — AI Orchestration (multi-agent pipeline)
+    Route::prefix('orchestration')->group(function () {
+        Route::post('/', [OrchestrationController::class, 'store'])->middleware('permission:reports.create');
+        Route::get('/', [OrchestrationController::class, 'index'])->middleware('permission:reports.view');
+        Route::get('{run}', [OrchestrationController::class, 'show'])->middleware('permission:reports.view');
+        Route::post('{run}/compliance', [OrchestrationController::class, 'checkCompliance'])->middleware('permission:reports.edit');
+        Route::post('{run}/promote', [OrchestrationController::class, 'promote'])->middleware('permission:reports.create');
     });
 
     // M14 — projects (reports are stored by project)

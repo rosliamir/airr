@@ -20,7 +20,7 @@ class AiConfigApiTest extends TestCase
         $this->getJson('/api/ai/config')
             ->assertOk()
             ->assertJsonPath('data.provider', 'ollama')
-            ->assertJsonPath('data.tasks', ['embedding', 'generation', 'reasoning', 'audit']);
+            ->assertJsonPath('data.tasks', ['embedding', 'generation', 'reasoning', 'audit', 'retrieval', 'compliance']);
     }
 
     public function test_update_defaults_persists_to_settings(): void

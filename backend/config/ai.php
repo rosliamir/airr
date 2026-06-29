@@ -11,12 +11,15 @@ return [
     'provider' => env('AI_PROVIDER', 'ollama'),
 
     // System-default model per task. Empty project config inherits these.
-    // Tasks: embedding | generation | reasoning | audit.
+    // Tasks: embedding | generation | reasoning | audit | retrieval | compliance.
     'defaults' => [
-        'embedding'  => env('AI_MODEL_EMBEDDING', 'nomic-embed-text'),
+        'embedding'  => env('AI_MODEL_EMBEDDING',  'nomic-embed-text'),
         'generation' => env('AI_MODEL_GENERATION', 'llama3.1:8b'),
-        'reasoning'  => env('AI_MODEL_REASONING', 'llama3.1:8b'),
-        'audit'      => env('AI_MODEL_AUDIT', 'llama3.1:8b'),
+        'reasoning'  => env('AI_MODEL_REASONING',  'llama3.1:8b'),
+        'audit'      => env('AI_MODEL_AUDIT',       'llama3.1:8b'),
+        // M4 — can map to same model or a different one per project override.
+        'retrieval'  => env('AI_MODEL_RETRIEVAL',  'nomic-embed-text'),
+        'compliance' => env('AI_MODEL_COMPLIANCE', 'llama3.1:8b'),
     ],
 
     // Provider connection details.
@@ -29,5 +32,5 @@ return [
     ],
 
     // Valid task keys (guards typos in resolveModel()).
-    'tasks' => ['embedding', 'generation', 'reasoning', 'audit'],
+    'tasks' => ['embedding', 'generation', 'reasoning', 'audit', 'retrieval', 'compliance'],
 ];
