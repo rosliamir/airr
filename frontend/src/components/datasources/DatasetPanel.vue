@@ -28,6 +28,31 @@ const showEditor = ref(false)
 const editing = ref<Dataset | null>(null)
 const form = ref<Dataset>(blank())
 
+// Log state
+type LogEntry = { id: number; event?: string; action?: string; user_name?: string; changed_by_name?: string; properties?: Record<string, unknown>; snapshot?: Record<string, unknown>; created_at: string }
+const logTarget = ref<Dataset | null>(null)
+const logTab = ref<'access' | 'history'>('history')
+const logEntries = ref<LogEntry[]>([])
+const logBusy = ref(false)
+
+async function openLog(d: Dataset) {
+  logTarget.value = d
+  logTab.value = 'history'
+  await fetchLogs(d, 'history')
+}
+async function fetchLogs(d: Dataset, tab: 'access' | 'history') {
+  logTab.value = tab
+  logBusy.value = true
+  logEntries.value = []
+  try {
+    const path = tab === 'history' ? `/datasets/${d.id}/history` : `/datasets/${d.id}/logs`
+    const res = await apiRequest<{ data: LogEntry[] }>(path)
+    logEntries.value = res.data
+  } finally {
+    logBusy.value = false
+  }
+}
+
 // Preview state
 const previewFor = ref<number | null>(null)
 const previewParams = ref<Record<string, string>>({})
@@ -141,6 +166,7 @@ async function runPreview(d: Dataset) {
         <div class="flex gap-3 shrink-0">
           <button @click="openPreview(d)" class="text-xs text-airr-600 hover:underline">Preview</button>
           <button v-if="canManage" @click="openEdit(d)" class="text-xs text-slate-500 hover:underline">Edit</button>
+          <button v-if="canManage" @click="openLog(d)" class="text-xs text-slate-500 hover:underline">Log</button>
           <button v-if="canManage" @click="remove(d)" class="text-xs text-rose-600 hover:underline">Delete</button>
         </div>
       </div>
@@ -168,6 +194,32 @@ async function runPreview(d: Dataset) {
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log modal -->
+    <div v-if="logTarget" class="fixed inset-0 bg-slate-900/30 flex items-center justify-center z-50 px-4 py-8 overflow-y-auto" @click.self="logTarget = null">
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6 space-y-4 my-auto">
+        <div class="flex items-center justify-between">
+          <h3 class="font-bold text-lg">Log · {{ logTarget.name }}</h3>
+          <button @click="logTarget = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+        </div>
+        <div class="flex gap-2 border-b border-slate-100 pb-2">
+          <button @click="fetchLogs(logTarget, 'history')" class="text-xs font-medium px-3 py-1.5 rounded-lg" :class="logTab === 'history' ? 'bg-airr-500 text-white' : 'text-slate-500 hover:bg-slate-50'">Change History</button>
+          <button @click="fetchLogs(logTarget, 'access')" class="text-xs font-medium px-3 py-1.5 rounded-lg" :class="logTab === 'access' ? 'bg-airr-500 text-white' : 'text-slate-500 hover:bg-slate-50'">Access Log</button>
+        </div>
+        <div v-if="logBusy" class="text-slate-400 text-sm">Loading…</div>
+        <div v-else-if="!logEntries.length" class="text-slate-400 text-sm">No entries yet.</div>
+        <div v-else class="space-y-2 max-h-96 overflow-y-auto pr-1">
+          <div v-for="e in logEntries" :key="e.id" class="border border-slate-100 rounded-lg p-3 text-xs">
+            <div class="flex justify-between items-center mb-1">
+              <span class="font-medium text-slate-700">{{ e.action ?? e.event }}</span>
+              <span class="text-slate-400">{{ e.changed_by_name ?? e.user_name }} · {{ e.created_at }}</span>
+            </div>
+            <pre v-if="e.snapshot" class="text-[10px] text-slate-500 whitespace-pre-wrap break-all">{{ JSON.stringify(e.snapshot, null, 2) }}</pre>
+            <pre v-else-if="e.properties && Object.keys(e.properties).length" class="text-[10px] text-slate-500 whitespace-pre-wrap break-all">{{ JSON.stringify(e.properties, null, 2) }}</pre>
+          </div>
         </div>
       </div>
     </div>
@@ -204,21 +256,6 @@ async function runPreview(d: Dataset) {
           </div>
           <div v-if="form.method === 'POST'"><label class="block text-sm font-medium text-slate-600 mb-1">Body</label>
             <textarea v-model="form.body" rows="3" class="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-airr-300" :placeholder="BODY_HINT"></textarea>
-          </div>
-        </div>
-
-        <!-- Parameters -->
-        <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="text-sm font-medium text-slate-600">Runtime parameters</label>
-            <button @click="addParam" class="text-xs text-airr-600 hover:underline">+ Add parameter</button>
-          </div>
-          <div v-for="(p, i) in form.parameters" :key="i" class="grid grid-cols-12 gap-1.5 mb-1.5 items-center">
-            <input v-model="p.name" placeholder="name" class="col-span-3 rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-airr-300" />
-            <input v-model="p.label" placeholder="label" class="col-span-3 rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-airr-300" />
-            <select v-model="p.type" class="col-span-2 rounded border border-slate-200 px-1 py-1 text-sm outline-none focus:ring-2 focus:ring-airr-300"><option>text</option><option>number</option><option>date</option><option>boolean</option></select>
-            <input v-model="p.default" placeholder="default" class="col-span-3 rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-airr-300" />
-            <button @click="form.parameters.splice(i, 1)" class="col-span-1 text-rose-500 text-xs">✕</button>
           </div>
         </div>
 

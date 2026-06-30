@@ -108,14 +108,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('data-sources', [DataSourceController::class, 'store']);
         Route::put('data-sources/{dataSource}', [DataSourceController::class, 'update']);
         Route::delete('data-sources/{dataSource}', [DataSourceController::class, 'destroy']);
+        Route::post('data-sources/{id}/restore', [DataSourceController::class, 'restore']);
         Route::post('data-sources/{dataSource}/test', [DataSourceController::class, 'test']);
         Route::post('data-sources/{dataSource}/introspect', [DataSourceController::class, 'introspect']);
         Route::post('data-sources/{dataSource}/upload', [DataSourceController::class, 'uploadFile']);
+        Route::get('data-sources/{dataSource}/history', [DataSourceController::class, 'history']);
+        Route::get('data-sources/{dataSource}/logs', [DataSourceController::class, 'logs']);
 
         Route::post('data-sources/{dataSource}/datasets', [DatasetController::class, 'store']);
         Route::put('datasets/{dataset}', [DatasetController::class, 'update']);
         Route::delete('datasets/{dataset}', [DatasetController::class, 'destroy']);
         Route::post('datasets/{dataset}/preview', [DatasetController::class, 'preview']);
+        Route::get('datasets/{dataset}/history', [DatasetController::class, 'history']);
+        Route::get('datasets/{dataset}/logs', [DatasetController::class, 'logs']);
     });
 
     // M3 — Knowledge Base (RAG) + documents (ingestion)

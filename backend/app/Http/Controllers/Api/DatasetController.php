@@ -10,6 +10,7 @@ use App\Services\AuditService;
 use App\Services\ConnectorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 // M2 Layer 2 — datasets (saved query/call + fields + runtime params) under a
 // data source. Read gated by datasources.view, writes by datasources.manage.
@@ -29,6 +30,7 @@ class DatasetController extends Controller
         $data = $this->validateDataset($request);
         $dataset = $dataSource->datasets()->create($data + ['created_by' => $request->user()->id]);
         $this->audit->log('dataset.created', Dataset::class, $dataset->id, null, ['name' => $dataset->name]);
+        $this->saveHistory($dataset, $request->user()->id, 'created');
 
         return $this->sendCreated($this->row($dataset));
     }
@@ -37,6 +39,7 @@ class DatasetController extends Controller
     {
         $dataset->update($this->validateDataset($request));
         $this->audit->log('dataset.updated', Dataset::class, $dataset->id);
+        $this->saveHistory($dataset, $request->user()->id, 'updated');
 
         return $this->sendOk($this->row($dataset));
     }
@@ -63,6 +66,43 @@ class DatasetController extends Controller
         }
     }
 
+    public function history(Dataset $dataset): JsonResponse
+    {
+        $rows = DB::table('dataset_histories as h')
+            ->join('users as u', 'u.id', '=', 'h.changed_by')
+            ->where('h.dataset_id', $dataset->id)
+            ->orderByDesc('h.created_at')
+            ->limit(50)
+            ->get(['h.id', 'h.action', 'h.snapshot', 'h.created_at', 'u.name as changed_by_name']);
+
+        return $this->sendOk($rows->map(fn ($r) => [
+            'id'              => $r->id,
+            'action'          => $r->action,
+            'snapshot'        => json_decode($r->snapshot, true),
+            'changed_by_name' => $r->changed_by_name,
+            'created_at'      => $r->created_at,
+        ]));
+    }
+
+    public function logs(Dataset $dataset): JsonResponse
+    {
+        $rows = DB::table('audit_logs as a')
+            ->leftJoin('users as u', 'u.id', '=', 'a.user_id')
+            ->where('a.subject_type', Dataset::class)
+            ->where('a.subject_id', $dataset->id)
+            ->orderByDesc('a.created_at')
+            ->limit(100)
+            ->get(['a.id', 'a.event', 'a.properties', 'a.created_at', 'u.name as user_name']);
+
+        return $this->sendOk($rows->map(fn ($r) => [
+            'id'         => $r->id,
+            'event'      => $r->event,
+            'properties' => json_decode($r->properties ?? '{}', true),
+            'user_name'  => $r->user_name ?? 'System',
+            'created_at' => $r->created_at,
+        ]));
+    }
+
     private function validateDataset(Request $request): array
     {
         return $request->validate([
@@ -81,6 +121,25 @@ class DatasetController extends Controller
             'parameters.*.type'       => 'nullable|in:text,number,date,boolean',
             'parameters.*.default'    => 'nullable',
             'parameters.*.required'   => 'nullable|boolean',
+        ]);
+    }
+
+    private function saveHistory(Dataset $dataset, int $userId, string $action): void
+    {
+        DB::table('dataset_histories')->insert([
+            'dataset_id'  => $dataset->id,
+            'changed_by'  => $userId,
+            'action'      => $action,
+            'snapshot'    => json_encode([
+                'name'        => $dataset->name,
+                'description' => $dataset->description,
+                'query'       => $dataset->query,
+                'method'      => $dataset->method,
+                'fields'      => $dataset->fields ?? [],
+                'parameters'  => $dataset->parameters ?? [],
+            ]),
+            'created_at'  => now(),
+            'updated_at'  => now(),
         ]);
     }
 

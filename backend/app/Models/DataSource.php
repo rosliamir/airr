@@ -5,11 +5,14 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 // M2 Layer 1 — a connection to a database or API. Credentials are stored
 // encrypted at rest (FR-M2.8).
 class DataSource extends Model
 {
+    use SoftDeletes;
+
     // NOTE: 'sqlserver' is supported in code (see ConnectorService::DRIVERS) but
     // disabled here until a SQL Server instance + pdo_sqlsrv driver are available.
     const DB_TYPES   = ['postgres', 'mysql', 'oracle'];

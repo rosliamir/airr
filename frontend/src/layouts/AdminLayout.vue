@@ -145,7 +145,7 @@ async function logout() {
 
     <!-- Main -->
     <div class="flex-1 flex flex-col min-w-0">
-      <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6">
+      <header class="relative z-10 h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6">
         <slot name="header">
           <h1 class="text-lg font-semibold">{{ $route.meta.title }}</h1>
         </slot>

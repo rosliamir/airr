@@ -9,6 +9,7 @@ use App\Services\AuditService;
 use App\Services\ConnectorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
@@ -23,6 +24,10 @@ class DataSourceController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = DataSource::query()->with('project:id,code,name')->withCount('datasets');
+
+        if ($request->boolean('with_trashed')) {
+            $query->withTrashed();
+        }
 
         // Visible if the viewer owns it or can see its project (admins: all).
         $viewer = $request->user();
@@ -55,6 +60,7 @@ class DataSourceController extends Controller
             'created_by' => $request->user()->id,
         ]);
         $this->audit->log('datasource.created', DataSource::class, $source->id, null, ['name' => $source->name, 'type' => $source->type]);
+        $this->saveHistory($source, $request->user()->id, 'created');
 
         return $this->sendCreated($this->row($source->fresh('project')));
     }
@@ -74,16 +80,26 @@ class DataSourceController extends Controller
         }
         $dataSource->save();
         $this->audit->log('datasource.updated', DataSource::class, $dataSource->id);
+        $this->saveHistory($dataSource, $request->user()->id, 'updated');
 
         return $this->sendOk($this->row($dataSource->fresh('project')));
     }
 
     public function destroy(DataSource $dataSource): JsonResponse
     {
-        $dataSource->delete(); // datasets cascade
+        $dataSource->delete(); // soft delete; datasets cascade via DB FK (hard delete deferred)
         $this->audit->log('datasource.deleted', DataSource::class, $dataSource->id);
 
         return $this->sendNoContent();
+    }
+
+    public function restore(Request $request, int $id): JsonResponse
+    {
+        $dataSource = DataSource::withTrashed()->findOrFail($id);
+        $dataSource->restore();
+        $this->audit->log('datasource.restored', DataSource::class, $dataSource->id);
+
+        return $this->sendOk($this->row($dataSource->fresh('project')));
     }
 
     // FR-M2.1/M2.2 — test connectivity and persist the result.
@@ -118,18 +134,41 @@ class DataSourceController extends Controller
         if (! $dataSource->isFile()) {
             return $this->sendError(422, 'NOT_A_FILE_SOURCE', 'This data source is not file-based.');
         }
+
+        $hasFile    = $request->hasFile('file');
+        $hasContent = $request->filled('json_content') && $dataSource->type === 'json';
+
+        if (! $hasFile && ! $hasContent) {
+            return $this->sendError(422, 'NO_INPUT', 'Provide a file or json_content for JSON sources.');
+        }
+
         $request->validate([
-            'file'       => 'required|file|mimes:csv,txt,json,xlsx,xls|max:10240',
-            'has_header' => 'nullable|boolean',
-            'delimiter'  => 'nullable|string|max:2',
+            'file'         => 'nullable|file|mimes:csv,txt,json,xlsx,xls|max:10240',
+            'json_content' => 'nullable|string',
+            'has_header'   => 'nullable|boolean',
+            'delimiter'    => 'nullable|string|max:2',
         ]);
 
-        // Remove a previously stored file.
+        // Remove previously stored file.
         if ($old = ($dataSource->config['file_path'] ?? null)) {
             Storage::disk('local')->delete($old);
         }
 
-        $path = $request->file('file')->store('data_files', 'local');
+        if ($hasContent) {
+            // Validate it parses as JSON.
+            $decoded = json_decode($request->input('json_content'), true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                return $this->sendError(422, 'INVALID_JSON', 'json_content is not valid JSON.');
+            }
+            $filename = 'data_files/json_' . $dataSource->id . '_' . time() . '.json';
+            Storage::disk('local')->put($filename, $request->input('json_content'));
+            $originalName = 'inline_' . now()->format('Ymd_His') . '.json';
+            $path = $filename;
+        } else {
+            $path = $request->file('file')->store('data_files', 'local');
+            $originalName = $request->file('file')->getClientOriginalName();
+        }
+
         $options = array_filter([
             'has_header' => $request->boolean('has_header', true),
             'delimiter'  => $request->input('delimiter'),
@@ -137,7 +176,7 @@ class DataSourceController extends Controller
 
         $dataSource->config = array_merge($dataSource->config ?? [], [
             'file_path'     => $path,
-            'original_name' => $request->file('file')->getClientOriginalName(),
+            'original_name' => $originalName,
             'options'       => $options,
         ]);
         $dataSource->save();
@@ -155,9 +194,49 @@ class DataSourceController extends Controller
             return $this->sendError(422, 'PARSE_FAILED', $e->getMessage());
         }
 
-        $this->audit->log('datasource.uploaded', DataSource::class, $dataSource->id, null, ['file' => $dataSource->config['original_name']]);
+        $this->audit->log('datasource.uploaded', DataSource::class, $dataSource->id, null, ['file' => $originalName]);
+        $this->saveHistory($dataSource, $request->user()->id, 'uploaded');
 
         return $this->sendOk($this->row($dataSource->fresh('project')));
+    }
+
+    // Change history snapshots.
+    public function history(DataSource $dataSource): JsonResponse
+    {
+        $rows = DB::table('data_source_histories as h')
+            ->join('users as u', 'u.id', '=', 'h.changed_by')
+            ->where('h.data_source_id', $dataSource->id)
+            ->orderByDesc('h.created_at')
+            ->limit(50)
+            ->get(['h.id', 'h.action', 'h.snapshot', 'h.created_at', 'u.name as changed_by_name']);
+
+        return $this->sendOk($rows->map(fn ($r) => [
+            'id'              => $r->id,
+            'action'          => $r->action,
+            'snapshot'        => json_decode($r->snapshot, true),
+            'changed_by_name' => $r->changed_by_name,
+            'created_at'      => $r->created_at,
+        ]));
+    }
+
+    // Access logs from the central audit log.
+    public function logs(DataSource $dataSource): JsonResponse
+    {
+        $rows = DB::table('audit_logs as a')
+            ->leftJoin('users as u', 'u.id', '=', 'a.user_id')
+            ->where('a.subject_type', DataSource::class)
+            ->where('a.subject_id', $dataSource->id)
+            ->orderByDesc('a.created_at')
+            ->limit(100)
+            ->get(['a.id', 'a.event', 'a.properties', 'a.created_at', 'u.name as user_name']);
+
+        return $this->sendOk($rows->map(fn ($r) => [
+            'id'         => $r->id,
+            'event'      => $r->event,
+            'properties' => json_decode($r->properties ?? '{}', true),
+            'user_name'  => $r->user_name ?? 'System',
+            'created_at' => $r->created_at,
+        ]));
     }
 
     private function validateSource(Request $request, ?DataSource $source = null): array
@@ -171,6 +250,28 @@ class DataSourceController extends Controller
             'name'       => 'required|string|max:160',
             'type'       => ['required', Rule::in(DataSource::TYPES)],
             'config'     => "{$configRequired}|array",
+        ]);
+    }
+
+    private function saveHistory(DataSource $source, int $userId, string $action): void
+    {
+        $cfg = $source->config ?? [];
+        // Mask credentials before storing snapshot.
+        $safeCfg = array_diff_key($cfg, array_flip(['password', 'token']));
+
+        DB::table('data_source_histories')->insert([
+            'data_source_id' => $source->id,
+            'changed_by'     => $userId,
+            'action'         => $action,
+            'snapshot'       => json_encode([
+                'name'          => $source->name,
+                'type'          => $source->type,
+                'project_id'    => $source->project_id,
+                'status'        => $source->status,
+                'config_safe'   => $safeCfg,
+            ]),
+            'created_at'     => now(),
+            'updated_at'     => now(),
         ]);
     }
 
@@ -200,6 +301,7 @@ class DataSourceController extends Controller
             'is_database'    => $d->isDatabase(),
             'is_file'        => $d->isFile(),
             'status'         => $d->status,
+            'deleted_at'     => $d->deleted_at?->toISOString(),
             'project'        => $d->project ? ['id' => $d->project->id, 'code' => $d->project->code, 'name' => $d->project->name] : null,
             'config_summary' => $safe,
             'datasets_count' => $d->datasets_count ?? $d->datasets()->count(),
