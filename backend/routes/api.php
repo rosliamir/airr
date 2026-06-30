@@ -160,6 +160,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('reports/{report}', [ReportController::class, 'update']);
         Route::delete('reports/{report}', [ReportController::class, 'destroy']);
     });
+    Route::get('reports/{report}/history', [ReportController::class, 'history'])->middleware('permission:reports.view');
+    Route::get('reports/{report}/logs', [ReportController::class, 'logs'])->middleware('permission:reports.view');
 
     // M4 — AI Orchestration (multi-agent pipeline)
     Route::prefix('orchestration')->group(function () {

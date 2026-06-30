@@ -10,6 +10,7 @@ use App\Services\ConnectorService;
 use App\Services\Reporting\ReportRenderer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 // M6 (FR-M6.1) — report definitions. Read gated by reports.view; create/edit by
@@ -95,6 +96,7 @@ class ReportController extends Controller
             $report->syncPermissions($data['permissions'] ?? []);
         }
         $this->audit->log('report.updated', Report::class, $report->id);
+        $this->saveHistory($report, $request->user()->id, 'updated');
 
         return $this->sendOk($this->row($report->fresh(['project', 'dataset', 'roles']), true));
     }
@@ -106,6 +108,47 @@ class ReportController extends Controller
         $this->audit->log('report.deleted', Report::class, $report->id);
 
         return $this->sendNoContent();
+    }
+
+    public function history(Request $request, Report $report): JsonResponse
+    {
+        $this->authorizeReport($request, $report, 'view');
+
+        $rows = DB::table('report_histories as h')
+            ->join('users as u', 'u.id', '=', 'h.changed_by')
+            ->where('h.report_id', $report->id)
+            ->orderByDesc('h.created_at')
+            ->limit(50)
+            ->get(['h.id', 'h.action', 'h.snapshot', 'h.created_at', 'u.name as changed_by_name']);
+
+        return $this->sendOk($rows->map(fn ($r) => [
+            'id'              => $r->id,
+            'action'          => $r->action,
+            'snapshot'        => json_decode($r->snapshot, true),
+            'changed_by_name' => $r->changed_by_name,
+            'created_at'      => $r->created_at,
+        ]));
+    }
+
+    public function logs(Request $request, Report $report): JsonResponse
+    {
+        $this->authorizeReport($request, $report, 'view');
+
+        $rows = DB::table('audit_logs as a')
+            ->leftJoin('users as u', 'u.id', '=', 'a.user_id')
+            ->where('a.subject_type', Report::class)
+            ->where('a.subject_id', $report->id)
+            ->orderByDesc('a.created_at')
+            ->limit(100)
+            ->get(['a.id', 'a.event', 'a.properties', 'a.created_at', 'u.name as user_name']);
+
+        return $this->sendOk($rows->map(fn ($r) => [
+            'id'         => $r->id,
+            'event'      => $r->event,
+            'properties' => json_decode($r->properties ?? '{}', true),
+            'user_name'  => $r->user_name ?? 'System',
+            'created_at' => $r->created_at,
+        ]));
     }
 
     // Per-report ACL gate (FR-M6 ACL) — abort 403 if the user lacks the ability.
@@ -144,6 +187,23 @@ class ReportController extends Controller
             'permissions.*.view'    => 'nullable|boolean',
             'permissions.*.edit'    => 'nullable|boolean',
             'permissions.*.run'     => 'nullable|boolean',
+        ]);
+    }
+
+    private function saveHistory(Report $report, int $userId, string $action): void
+    {
+        DB::table('report_histories')->insert([
+            'report_id'   => $report->id,
+            'changed_by'  => $userId,
+            'action'      => $action,
+            'snapshot'    => json_encode([
+                'name'       => $report->name,
+                'type'       => $report->type,
+                'status'     => $report->status,
+                'definition' => $report->definition ?? [],
+            ]),
+            'created_at'  => now(),
+            'updated_at'  => now(),
         ]);
     }
 
