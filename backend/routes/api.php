@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\AiController;
+use App\Http\Controllers\Api\ConstantController;
 use App\Http\Controllers\Api\OrchestrationController;
+use App\Http\Controllers\Api\TemplateController;
 use App\Http\Controllers\Api\AuditController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DatasetController;
@@ -162,6 +164,23 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::get('reports/{report}/history', [ReportController::class, 'history'])->middleware('permission:reports.view');
     Route::get('reports/{report}/logs', [ReportController::class, 'logs'])->middleware('permission:reports.view');
+
+    // Templates (global + project-scoped)
+    Route::get('templates', [TemplateController::class, 'index']);
+    Route::get('templates/{template}', [TemplateController::class, 'show']);
+    Route::middleware('permission:reports.create')->group(function () {
+        Route::post('templates', [TemplateController::class, 'store']);
+        Route::put('templates/{template}', [TemplateController::class, 'update']);
+        Route::delete('templates/{template}', [TemplateController::class, 'destroy']);
+    });
+
+    // Constants (system/global/project)
+    Route::get('constants', [ConstantController::class, 'index']);
+    Route::middleware('permission:settings.manage')->group(function () {
+        Route::post('constants', [ConstantController::class, 'store']);
+        Route::put('constants/{constant}', [ConstantController::class, 'update']);
+        Route::delete('constants/{constant}', [ConstantController::class, 'destroy']);
+    });
 
     // M4 — AI Orchestration (multi-agent pipeline)
     Route::prefix('orchestration')->group(function () {
