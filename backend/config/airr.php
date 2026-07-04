@@ -30,6 +30,7 @@ return [
         'rbac_full'           => ['standard', 'enterprise'],
         'mpsa_checks'         => ['standard', 'enterprise'],
         'project_ai_config'   => ['standard', 'enterprise'], // per-project model override (FR-M14.5); Community = system default only
+        'project_constants'   => ['standard', 'enterprise'], // per-project constants (templates); same tier as project_ai_config
 
         // Enterprise only
         'zero_trust_rag'      => ['enterprise'],

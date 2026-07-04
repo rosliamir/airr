@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import AdminLayout from '../layouts/AdminLayout.vue'
+import ConstantsPanel from '../components/ConstantsPanel.vue'
 import { apiRequest, ApiException } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
@@ -298,6 +299,12 @@ onMounted(() => {
                 class="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
             </div>
           </div>
+        </div>
+
+        <!-- Per-project constants — gated the same tier as the AI override above (FR-M14.5 precedent) -->
+        <div v-if="aiCfg?.per_project && editing" class="rounded-lg border border-slate-200 p-4 space-y-2">
+          <div class="text-sm font-medium text-slate-600">Project constants <span class="text-slate-400 font-normal">· optional</span></div>
+          <ConstantsPanel scope="project" :project-id="editing.id" />
         </div>
 
         <div class="grid grid-cols-2 gap-4">

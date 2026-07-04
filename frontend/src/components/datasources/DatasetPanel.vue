@@ -56,8 +56,12 @@ async function fetchLogs(d: Dataset, tab: 'access' | 'history') {
 // Preview state
 const previewFor = ref<number | null>(null)
 const previewParams = ref<Record<string, string>>({})
-const previewResult = ref<{ columns: string[]; rows: Record<string, unknown>[]; count: number } | null>(null)
+const previewResult = ref<{
+  columns: string[]; rows: Record<string, unknown>[]; count: number
+  total: number | null; page: number; per_page: number; total_pages: number | null
+} | null>(null)
 const previewError = ref('')
+const previewPage = ref(1)
 
 const isDb = computed(() => props.source.is_database)
 const isFile = computed(() => props.source.is_file ?? false)
@@ -124,19 +128,22 @@ function openPreview(d: Dataset) {
   previewResult.value = null
   previewError.value = ''
   previewParams.value = {}
+  previewPage.value = 1
   for (const p of d.parameters ?? []) previewParams.value[p.name] = p.default ?? ''
 }
-async function runPreview(d: Dataset) {
+async function runPreview(d: Dataset, page = 1) {
   busy.value = true
   previewError.value = ''
-  previewResult.value = null
+  previewPage.value = page
   try {
-    const res = await apiRequest<{ data: { columns: string[]; rows: Record<string, unknown>[]; count: number } }>(
-      `/datasets/${d.id}/preview`, { method: 'POST', body: JSON.stringify({ params: previewParams.value }) },
+    const res = await apiRequest<{ data: typeof previewResult.value }>(
+      `/datasets/${d.id}/preview`,
+      { method: 'POST', body: JSON.stringify({ params: previewParams.value, page, per_page: 20 }) },
     )
     previewResult.value = res.data
   } catch (e) {
     previewError.value = e instanceof ApiException ? e.error.message : 'Preview failed'
+    previewResult.value = null
   } finally {
     busy.value = false
   }
@@ -180,12 +187,15 @@ async function runPreview(d: Dataset) {
               class="rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-airr-300" />
           </div>
         </div>
-        <button @click="runPreview(d)" :disabled="busy" class="text-xs font-medium text-white bg-airr-500 hover:bg-airr-600 rounded px-3 py-1.5 disabled:opacity-50">
+        <button @click="runPreview(d, 1)" :disabled="busy" class="text-xs font-medium text-white bg-airr-500 hover:bg-airr-600 rounded px-3 py-1.5 disabled:opacity-50">
           {{ busy ? 'Running…' : 'Run' }}
         </button>
-        <p v-if="previewError" class="text-xs text-rose-700 bg-rose-50 rounded px-2 py-1">{{ previewError }}</p>
+        <p v-if="previewError" class="text-xs text-rose-700 bg-rose-50 rounded px-2 py-1 whitespace-pre-wrap">{{ previewError }}</p>
         <div v-if="previewResult" class="overflow-x-auto">
-          <div class="text-[11px] text-slate-400 mb-1">{{ previewResult.count }} rows (max 100)</div>
+          <div class="text-[11px] text-slate-400 mb-1">
+            {{ previewResult.count }} rows shown
+            <template v-if="previewResult.total !== null"> · {{ previewResult.total }} total · page {{ previewResult.page }} of {{ previewResult.total_pages }}</template>
+          </div>
           <table class="text-xs border border-slate-100 rounded">
             <thead class="bg-slate-50"><tr><th v-for="c in previewResult.columns" :key="c" class="px-2 py-1 text-left font-medium text-slate-500">{{ c }}</th></tr></thead>
             <tbody>
@@ -194,6 +204,18 @@ async function runPreview(d: Dataset) {
               </tr>
             </tbody>
           </table>
+
+          <!-- Page navigation -->
+          <div v-if="previewResult.total_pages && previewResult.total_pages > 1" class="flex items-center gap-1 mt-2 flex-wrap">
+            <button @click="runPreview(d, previewPage - 1)" :disabled="busy || previewPage <= 1"
+              class="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-50 disabled:opacity-40">‹ Prev</button>
+            <button v-for="p in Math.min(previewResult.total_pages, 8)" :key="p" @click="runPreview(d, p)"
+              :disabled="busy" class="text-xs w-7 h-7 rounded"
+              :class="p === previewPage ? 'bg-airr-500 text-white' : 'border border-slate-200 hover:bg-slate-50 text-slate-600'">{{ p }}</button>
+            <span v-if="previewResult.total_pages > 8" class="text-xs text-slate-400 px-1">… {{ previewResult.total_pages }}</span>
+            <button @click="runPreview(d, previewPage + 1)" :disabled="busy || previewPage >= previewResult.total_pages"
+              class="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-50 disabled:opacity-40">Next ›</button>
+          </div>
         </div>
       </div>
     </div>

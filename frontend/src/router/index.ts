@@ -15,6 +15,8 @@ import KnowledgeBaseView from '../views/KnowledgeBaseView.vue'
 import ReportsView from '../views/ReportsView.vue'
 import MenusView from '../views/MenusView.vue'
 import AiOrchestrationView from '../views/AiOrchestrationView.vue'
+import TemplatesView from '../views/TemplatesView.vue'
+import ConstantsView from '../views/ConstantsView.vue'
 import ComingSoonView from '../views/ComingSoonView.vue'
 
 // Real views for the modules that are already built.
@@ -29,6 +31,8 @@ const readyViews: Record<string, () => unknown> = {
   reports: () => ReportsView,
   menus: () => MenusView,
   'ai-orchestration': () => AiOrchestrationView,
+  templates: () => TemplatesView,
+  constants: () => ConstantsView,
 }
 
 // Build protected routes from the menu config so the two never drift.

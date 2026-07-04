@@ -52,12 +52,14 @@ class DatasetController extends Controller
         return $this->sendNoContent();
     }
 
-    // FR-M2.5 — run with runtime parameter values; returns sample rows.
+    // FR-M2.5 — run with runtime parameter values; returns paginated rows (20/page by default).
     public function preview(Request $request, Dataset $dataset): JsonResponse
     {
         $values = (array) $request->input('params', []);
+        $page = max(1, (int) $request->input('page', 1));
+        $perPage = max(1, (int) $request->input('per_page', 20));
         try {
-            $result = $this->connector->run($dataset->load('dataSource'), $values);
+            $result = $this->connector->run($dataset->load('dataSource'), $values, $page, $perPage);
             $this->audit->log('dataset.previewed', Dataset::class, $dataset->id);
 
             return $this->sendOk($result);

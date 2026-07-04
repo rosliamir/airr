@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import AdminLayout from '../layouts/AdminLayout.vue'
+import ConstantsPanel from '../components/ConstantsPanel.vue'
 import { apiRequest, ApiException } from '../api/client'
 
 type Feature = { key: string; enabled: boolean; editions: string[] }
@@ -22,7 +23,8 @@ type AiConfig = {
 }
 type AiHealth = { provider: string; reachable: boolean; models: { name: string }[] }
 
-const tab = ref<'regional' | 'lookup' | 'ai' | 'subscription' | 'about'>('regional')
+const tab = ref<'regional' | 'lookup' | 'ai' | 'constants' | 'subscription' | 'about'>('regional')
+const constantsScope = ref<'system' | 'global'>('system')
 
 // --- Lookups (M14): reference values that feed dropdowns (user_type, project_type, …) ---
 type Lookup = { id: number; category: string; value: string; label: string; sort: number; is_active: boolean; is_system: boolean }
@@ -199,7 +201,7 @@ onMounted(() => {
   <AdminLayout>
     <div class="space-y-5">
       <div class="flex gap-6 border-b border-slate-200">
-        <button v-for="t in (['regional', 'lookup', 'ai', 'subscription', 'about'] as const)" :key="t" @click="tab = t"
+        <button v-for="t in (['regional', 'lookup', 'ai', 'constants', 'subscription', 'about'] as const)" :key="t" @click="tab = t"
           class="pb-2.5 text-sm font-medium border-b-2 -mb-px transition capitalize"
           :class="tab === t ? 'border-airr-500 text-airr-600' : 'border-transparent text-slate-500 hover:text-slate-700'">
           {{ t === 'ai' ? 'AI / Models' : t }}
@@ -224,6 +226,15 @@ onMounted(() => {
           </button>
           <span v-if="saved" class="text-sm text-emerald-600">✓ Saved</span>
         </div>
+      </div>
+
+      <!-- CONSTANTS (also managed at Governance > Constants) -->
+      <div v-else-if="tab === 'constants'" class="max-w-2xl">
+        <div class="flex gap-2 mb-3">
+          <button @click="constantsScope = 'system'" class="text-xs font-medium px-3 py-1.5 rounded-lg" :class="constantsScope === 'system' ? 'bg-airr-500 text-white' : 'text-slate-500 hover:bg-slate-50'">System (fixed)</button>
+          <button @click="constantsScope = 'global'" class="text-xs font-medium px-3 py-1.5 rounded-lg" :class="constantsScope === 'global' ? 'bg-airr-500 text-white' : 'text-slate-500 hover:bg-slate-50'">Global (custom)</button>
+        </div>
+        <ConstantsPanel :key="constantsScope" :scope="constantsScope" />
       </div>
 
       <!-- LOOKUP (reference values) -->

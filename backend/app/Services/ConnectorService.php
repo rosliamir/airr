@@ -121,24 +121,27 @@ class ConnectorService
         }
     }
 
-    // FR-M2.5 — run a dataset with runtime parameter values; returns sample rows.
-    public function run(Dataset $dataset, array $paramValues): array
+    // FR-M2.5 — run a dataset with runtime parameter values; returns paginated rows
+    // (default 20/page) plus total count for page navigation.
+    public function run(Dataset $dataset, array $paramValues, int $page = 1, int $perPage = 20): array
     {
         $source = $dataset->dataSource;
         $params = $this->resolveParams($dataset, $paramValues);
+        $page = max(1, $page);
+        $perPage = max(1, min(self::PREVIEW_LIMIT, $perPage));
 
         if ($source->isFile()) {
-            return $this->runFile($source, $params);
+            return $this->runFile($source, $params, $page, $perPage);
         }
 
         return $source->isDatabase()
-            ? $this->runSql($source, $dataset, $params)
-            : $this->runApi($source, $dataset, $params);
+            ? $this->runSql($source, $dataset, $params, $page, $perPage)
+            : $this->runApi($source, $dataset, $params, $page, $perPage);
     }
 
     // File datasets read the parsed rows; params matching a column filter by
     // equality (simple, case-insensitive). Empty params return all rows.
-    private function runFile(DataSource $source, array $params): array
+    private function runFile(DataSource $source, array $params, int $page, int $perPage): array
     {
         $parsed = $this->parseFile($source);
         $rows = $parsed['rows'];
@@ -159,30 +162,98 @@ class ConnectorService
             }));
         }
 
-        $rows = array_slice($rows, 0, self::PREVIEW_LIMIT);
+        $total = count($rows);
+        $rows = array_slice($rows, ($page - 1) * $perPage, $perPage);
 
-        return ['columns' => $parsed['columns'], 'rows' => $rows, 'count' => count($rows)];
+        return $this->paginated($parsed['columns'], $rows, $total, $page, $perPage);
     }
 
     // --- DB ---
 
-    private function runSql(DataSource $source, Dataset $dataset, array $params): array
+    private function runSql(DataSource $source, Dataset $dataset, array $params, int $page, int $perPage): array
     {
         $sql = trim((string) $dataset->query);
         $this->guardSelect($sql);
 
         try {
-            $rows = $this->dbConnection($source)->select($sql, $params);
-            $rows = array_slice($rows, 0, self::PREVIEW_LIMIT);
+            $conn = $this->dbConnection($source);
+            $offset = ($page - 1) * $perPage;
+            $pagedSql = $this->applyPagination($sql, $source->type, $offset, $perPage);
 
-            return [
-                'columns' => $rows ? array_keys((array) $rows[0]) : [],
-                'rows'    => array_map(fn ($r) => (array) $r, $rows),
-                'count'   => count($rows),
-            ];
+            try {
+                $rows = $conn->select($pagedSql, $params);
+            } catch (\Illuminate\Database\QueryException $e) {
+                if (str_contains($e->getMessage(), 'ORA-00918') || str_contains($e->getMessage(), 'ambiguously defined')) {
+                    throw new \RuntimeException(
+                        'This query selects two columns with the same name from different tables '
+                        . '(e.g. a join key present in both, like "select a.*, b.*"). Pagination needs to '
+                        . 'wrap the query, which Oracle rejects when column names collide — please alias '
+                        . 'the duplicate column(s) in the SQL (e.g. "b.NO_BIL_PELBAGAI AS DTL_NO_BIL_PELBAGAI").'
+                    );
+                }
+                throw $e;
+            }
+
+            $total = null;
+            try {
+                $countRow = $conn->selectOne("SELECT COUNT(*) AS total FROM ({$sql}) airr_count", $params);
+                $total = (int) ((array) $countRow)['total'];
+            } catch (\Throwable) {
+                // Best-effort — some hand-written queries won't wrap cleanly for COUNT; page nav
+                // just won't know the exact last page in that case, rows themselves still work.
+            }
+
+            // Strip the internal ROWNUM bookkeeping column added for Oracle pagination.
+            $rows = array_map(function ($r) {
+                $row = (array) $r;
+                unset($row['airr_rnum'], $row['AIRR_RNUM']);
+
+                return $row;
+            }, $rows);
+
+            return $this->paginated(
+                $rows ? array_keys($rows[0]) : [],
+                $rows,
+                $total,
+                $page,
+                $perPage,
+            );
         } finally {
             $this->purge($source);
         }
+    }
+
+    // Push LIMIT/OFFSET (or ANSI OFFSET…FETCH for SQL Server) down into the query
+    // itself — never fetch the full result set into PHP just to slice it, that's
+    // what exhausts memory on large joins.
+    private function applyPagination(string $sql, string $sourceType, int $offset, int $perPage): string
+    {
+        if ($sourceType === 'oracle') {
+            // Classic ROWNUM double-wrap — portable across Oracle versions (incl.
+            // pre-12c, which has no ANSI OFFSET…FETCH support).
+            $maxRow = $offset + $perPage;
+
+            return "SELECT * FROM (SELECT airr_page.*, ROWNUM airr_rnum FROM ({$sql}) airr_page WHERE ROWNUM <= {$maxRow}) WHERE airr_rnum > {$offset}";
+        }
+
+        if ($sourceType === 'sqlserver') {
+            return "SELECT * FROM ({$sql}) airr_page OFFSET {$offset} ROWS FETCH NEXT {$perPage} ROWS ONLY";
+        }
+
+        return "SELECT * FROM ({$sql}) airr_page LIMIT {$perPage} OFFSET {$offset}";
+    }
+
+    private function paginated(array $columns, array $rows, ?int $total, int $page, int $perPage): array
+    {
+        return [
+            'columns'      => $columns,
+            'rows'         => $rows,
+            'count'        => count($rows),
+            'total'        => $total,
+            'page'         => $page,
+            'per_page'     => $perPage,
+            'total_pages'  => $total !== null ? (int) ceil($total / $perPage) : null,
+        ];
     }
 
     // Only single SELECT statements may run (guardrail).
@@ -244,7 +315,7 @@ class ConnectorService
 
     // --- API ---
 
-    private function runApi(DataSource $source, Dataset $dataset, array $params): array
+    private function runApi(DataSource $source, Dataset $dataset, array $params, int $page, int $perPage): array
     {
         $cfg = $source->config ?? [];
         $path = $this->interpolate((string) $dataset->query, $params);
@@ -275,14 +346,16 @@ class ConnectorService
             }
         }
         $rows = is_array($json) && array_is_list($json) ? $json : [$json];
-        $rows = array_slice($rows, 0, self::PREVIEW_LIMIT);
+        $total = count($rows);
+        $rows = array_slice($rows, ($page - 1) * $perPage, $perPage);
 
-        return [
-            'columns' => $rows && is_array($rows[0]) ? array_keys($rows[0]) : [],
-            'rows'    => $rows,
-            'count'   => count($rows),
-            'status'  => $res->status(),
-        ];
+        return $this->paginated(
+            $rows && is_array($rows[0]) ? array_keys($rows[0]) : [],
+            $rows,
+            $total,
+            $page,
+            $perPage,
+        ) + ['status' => $res->status()];
     }
 
     private function http(DataSource $source)

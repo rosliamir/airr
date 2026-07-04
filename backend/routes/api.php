@@ -168,14 +168,20 @@ Route::middleware('auth:sanctum')->group(function () {
     // Templates (global + project-scoped)
     Route::get('templates', [TemplateController::class, 'index']);
     Route::get('templates/{template}', [TemplateController::class, 'show']);
+    Route::get('templates/{template}/history', [TemplateController::class, 'history']);
+    Route::get('templates/{template}/logs', [TemplateController::class, 'logs']);
     Route::middleware('permission:reports.create')->group(function () {
         Route::post('templates', [TemplateController::class, 'store']);
+        Route::post('templates/fill-from-prompt', [TemplateController::class, 'fillFromPrompt']);
         Route::put('templates/{template}', [TemplateController::class, 'update']);
+        Route::post('templates/{id}/restore', [TemplateController::class, 'restore']);
         Route::delete('templates/{template}', [TemplateController::class, 'destroy']);
     });
 
     // Constants (system/global/project)
     Route::get('constants', [ConstantController::class, 'index']);
+    Route::get('constants/{constant}/image', [ConstantController::class, 'image'])->name('constants.image');
+    Route::get('constants/{constant}/history', [ConstantController::class, 'history'])->middleware('permission:settings.manage');
     Route::middleware('permission:settings.manage')->group(function () {
         Route::post('constants', [ConstantController::class, 'store']);
         Route::put('constants/{constant}', [ConstantController::class, 'update']);

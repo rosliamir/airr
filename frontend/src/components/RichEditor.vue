@@ -1,15 +1,22 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 
 const props = defineProps<{
   modelValue: string
   placeholder?: string
-  constants?: { placeholder: string; label: string; scope: string }[]
+  constants?: { placeholder: string; label: string; scope: string; type?: string; image_url?: string | null }[]
 }>()
 const emit = defineEmits<{ 'update:modelValue': [string] }>()
 
 const editorRef = ref<HTMLDivElement | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
 const showConstantPicker = ref(false)
+const showImagePicker = ref(false)
+const showTablePicker = ref(false)
+const tableRows = ref(2)
+const tableCols = ref(2)
+const imageConstants = computed(() => (props.constants ?? []).filter((c) => c.type === 'image'))
+const constantPickerIcon = '{' + '{…}' + '}'
 
 // Sync incoming value only when it differs (avoid cursor reset on every keystroke)
 let lastEmitted = ''
@@ -61,12 +68,115 @@ function insertConstant(placeholder: string) {
   onInput()
 }
 
-// Before emitting, replace rendered placeholder spans back to raw text.
+// Insert an <img> bound to an image-type constant — serialized back to its
+// {{SCOPE:KEY}} placeholder on save (see getRaw), so the reference stays live.
+function insertConstantImage(c: { placeholder: string; image_url?: string | null }) {
+  editorRef.value?.focus()
+  const sel = window.getSelection()
+  if (sel && sel.rangeCount && c.image_url) {
+    const range = sel.getRangeAt(0)
+    range.deleteContents()
+    const img = document.createElement('img')
+    img.src = c.image_url
+    img.dataset.constantPlaceholder = c.placeholder
+    img.style.maxHeight = '48px'
+    range.insertNode(img)
+    range.setStartAfter(img)
+    range.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
+  showImagePicker.value = false
+  onInput()
+}
+
+// One-off image (e.g. a logo pasted once, not registered as a Constant) —
+// embedded as base64 directly in the section HTML, no upload/orphan cleanup needed.
+function triggerUpload() {
+  fileInputRef.value?.click()
+}
+function onUploadChange(ev: Event) {
+  const file = (ev.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    editorRef.value?.focus()
+    const sel = window.getSelection()
+    if (sel && sel.rangeCount) {
+      const range = sel.getRangeAt(0)
+      range.deleteContents()
+      const img = document.createElement('img')
+      img.src = String(reader.result)
+      img.style.maxHeight = '96px'
+      range.insertNode(img)
+      range.setStartAfter(img)
+      range.collapse(true)
+      sel.removeAllRanges()
+      sel.addRange(range)
+    }
+    onInput()
+  }
+  reader.readAsDataURL(file)
+  ;(ev.target as HTMLInputElement).value = ''
+  showImagePicker.value = false
+}
+
+// Insert a plain HTML <table> skeleton, editable cell-by-cell in place.
+function insertTable() {
+  editorRef.value?.focus()
+  const sel = window.getSelection()
+  if (sel && sel.rangeCount) {
+    const rows = Math.max(1, Math.min(20, tableRows.value))
+    const cols = Math.max(1, Math.min(12, tableCols.value))
+    const table = document.createElement('table')
+    table.style.borderCollapse = 'collapse'
+    table.style.width = '100%'
+    for (let r = 0; r < rows; r++) {
+      const tr = document.createElement('tr')
+      for (let c = 0; c < cols; c++) {
+        const td = document.createElement('td')
+        td.style.border = '1px solid #cbd5e1'
+        td.style.padding = '6px 8px'
+        td.innerHTML = '&nbsp;'
+        tr.appendChild(td)
+      }
+      table.appendChild(tr)
+    }
+    const range = sel.getRangeAt(0)
+    range.deleteContents()
+    range.insertNode(table)
+  }
+  showTablePicker.value = false
+  onInput()
+}
+
+// Insert a bordered box (rectangular or rounded) as a container users can type into.
+function insertBox(rounded: boolean) {
+  editorRef.value?.focus()
+  const sel = window.getSelection()
+  if (sel && sel.rangeCount) {
+    const box = document.createElement('div')
+    box.style.border = '1px solid #cbd5e1'
+    box.style.padding = '12px'
+    box.style.borderRadius = rounded ? '12px' : '0px'
+    box.textContent = 'Box content…'
+    const range = sel.getRangeAt(0)
+    range.deleteContents()
+    range.insertNode(box)
+  }
+  showTablePicker.value = false
+  onInput()
+}
+
+// Before emitting, replace rendered placeholder spans/images back to raw text.
 function getRaw(): string {
   if (!editorRef.value) return ''
   const clone = editorRef.value.cloneNode(true) as HTMLDivElement
   clone.querySelectorAll('[data-placeholder]').forEach((el) => {
     el.replaceWith(document.createTextNode((el as HTMLElement).dataset.placeholder ?? ''))
+  })
+  clone.querySelectorAll('img[data-constant-placeholder]').forEach((el) => {
+    el.replaceWith(document.createTextNode((el as HTMLElement).dataset.constantPlaceholder ?? ''))
   })
   return clone.innerHTML
 }
@@ -128,7 +238,7 @@ const SCOPE_COLOR: Record<string, string> = {
       <!-- Constants picker -->
       <div class="relative">
         <button @click="showConstantPicker = !showConstantPicker"
-          class="toolbar-btn text-amber-600 font-mono text-[10px] px-2">{{…}}</button>
+          class="toolbar-btn text-amber-600 font-mono text-[10px] px-2">{{ constantPickerIcon }}</button>
         <div v-if="showConstantPicker && constants?.length"
           class="absolute left-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-2 space-y-1 max-h-56 overflow-y-auto">
           <div v-for="c in constants" :key="c.placeholder">
@@ -142,6 +252,51 @@ const SCOPE_COLOR: Record<string, string> = {
         </div>
         <div v-else-if="showConstantPicker" class="absolute left-0 top-full mt-1 w-48 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-3 text-xs text-slate-400">
           No constants available.
+        </div>
+      </div>
+
+      <div class="w-px h-5 bg-slate-200 mx-1"></div>
+
+      <!-- Insert image -->
+      <div class="relative">
+        <button @click="showImagePicker = !showImagePicker" title="Insert image" class="toolbar-btn">🖼</button>
+        <div v-if="showImagePicker" class="absolute left-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-2 space-y-1">
+          <button @click="triggerUpload" class="w-full text-left rounded-lg px-2 py-1.5 hover:bg-slate-50 text-xs text-slate-600">Upload one-off image…</button>
+          <template v-if="imageConstants.length">
+            <div class="text-[10px] uppercase tracking-wide text-slate-400 px-2 pt-1">Image constants</div>
+            <button v-for="c in imageConstants" :key="c.placeholder" @click="insertConstantImage(c)"
+              class="w-full text-left flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 text-xs">
+              <img v-if="c.image_url" :src="c.image_url" class="w-5 h-5 rounded object-cover" />
+              <span class="font-mono text-amber-700 truncate">{{ c.placeholder }}</span>
+            </button>
+          </template>
+        </div>
+        <input ref="fileInputRef" type="file" accept="image/*" class="hidden" @change="onUploadChange" />
+      </div>
+
+      <div class="w-px h-5 bg-slate-200 mx-1"></div>
+
+      <!-- Insert table / box -->
+      <div class="relative">
+        <button @click="showTablePicker = !showTablePicker" title="Insert table or box" class="toolbar-btn">▦</button>
+        <div v-if="showTablePicker" class="absolute left-0 top-full mt-1 w-56 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-3 space-y-3 text-xs">
+          <div>
+            <div class="text-[10px] uppercase tracking-wide text-slate-400 mb-1.5">Table</div>
+            <div class="flex items-center gap-2 mb-2">
+              <input v-model.number="tableRows" type="number" min="1" max="20" class="w-14 rounded border border-slate-200 px-1.5 py-1 text-xs" />
+              <span class="text-slate-400">rows ×</span>
+              <input v-model.number="tableCols" type="number" min="1" max="12" class="w-14 rounded border border-slate-200 px-1.5 py-1 text-xs" />
+              <span class="text-slate-400">cols</span>
+            </div>
+            <button @click="insertTable" class="w-full rounded-lg bg-airr-500 hover:bg-airr-600 text-white text-xs font-medium py-1.5">Insert table</button>
+          </div>
+          <div class="border-t border-slate-100 pt-2">
+            <div class="text-[10px] uppercase tracking-wide text-slate-400 mb-1.5">Box</div>
+            <div class="flex gap-2">
+              <button @click="insertBox(false)" class="flex-1 rounded border border-slate-200 hover:bg-slate-50 py-1.5">Rectangular</button>
+              <button @click="insertBox(true)" class="flex-1 rounded-xl border border-slate-200 hover:bg-slate-50 py-1.5">Rounded</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -159,6 +314,7 @@ const SCOPE_COLOR: Record<string, string> = {
 </template>
 
 <style scoped>
+@reference "../style.css";
 .toolbar-btn {
   @apply text-xs text-slate-600 hover:bg-slate-200 rounded px-1.5 py-0.5 leading-none transition select-none;
 }
