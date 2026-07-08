@@ -155,15 +155,26 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('reports/{report}', [ReportController::class, 'show']);
     });
     Route::post('reports/{report}/run', [ReportController::class, 'run'])->middleware('permission:reports.run');
+    Route::post('reports/{report}/preview', [ReportController::class, 'preview'])->middleware('permission:reports.run');
     Route::middleware('permission:reports.create')->group(function () {
         Route::post('reports', [ReportController::class, 'store']);
+        Route::post('reports/import', [ReportController::class, 'import']);
+        Route::post('reports/{report}/duplicate', [ReportController::class, 'duplicate']);
     });
     Route::middleware('permission:reports.edit')->group(function () {
         Route::put('reports/{report}', [ReportController::class, 'update']);
         Route::delete('reports/{report}', [ReportController::class, 'destroy']);
+        Route::post('reports/{report}/archive', [ReportController::class, 'archive']);
+        Route::post('reports/{report}/unarchive', [ReportController::class, 'unarchive']);
+        Route::post('reports/{id}/restore', [ReportController::class, 'restore']);
+        Route::post('reports/{report}/publish', [ReportController::class, 'publish']);
+        Route::post('reports/{report}/lock', [ReportController::class, 'lock']);
+        Route::post('reports/{report}/unlock', [ReportController::class, 'unlock']);
+        Route::post('reports/{report}/generate-from-prompt', [ReportController::class, 'generateFromPrompt']);
     });
     Route::get('reports/{report}/history', [ReportController::class, 'history'])->middleware('permission:reports.view');
     Route::get('reports/{report}/logs', [ReportController::class, 'logs'])->middleware('permission:reports.view');
+    Route::get('reports/{report}/export', [ReportController::class, 'export'])->middleware('permission:reports.view');
 
     // Templates (global + project-scoped)
     Route::get('templates', [TemplateController::class, 'index']);

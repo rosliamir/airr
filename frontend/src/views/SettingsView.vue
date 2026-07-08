@@ -14,13 +14,17 @@ type Settings = {
   }
 }
 
+type HostedProviderCfg = { base_url: string | null; api_key_set: boolean }
 type AiConfig = {
   provider: string
+  available_providers: string[]
+  hosted: Record<string, HostedProviderCfg>
   tasks: string[]
   defaults: { provider: string; models: Record<string, string> }
   per_project: boolean
   edition: string
 }
+const PROVIDER_LABELS: Record<string, string> = { ollama: 'Ollama', openai: 'OpenAI', claude: 'Claude' }
 type AiHealth = { provider: string; reachable: boolean; models: { name: string }[] }
 
 const tab = ref<'regional' | 'lookup' | 'ai' | 'constants' | 'subscription' | 'about'>('regional')
@@ -90,6 +94,9 @@ const ai = ref<AiConfig | null>(null)
 const aiModels = ref<Record<string, string>>({})
 const aiHealth = ref<AiHealth | null>(null)
 const checkingHealth = ref(false)
+const selectedProvider = ref<string>('ollama')
+const hostedBaseUrl = ref<Record<string, string>>({ openai: '', claude: '' })
+const hostedApiKey = ref<Record<string, string>>({ openai: '', claude: '' }) // left blank unless entering a new key
 
 const TASK_LABELS: Record<string, string> = {
   embedding: 'Embedding (RAG vectors)',
@@ -151,6 +158,11 @@ async function loadAi() {
   try {
     ai.value = (await apiRequest<{ data: AiConfig }>('/ai/config')).data
     aiModels.value = { ...ai.value.defaults.models }
+    selectedProvider.value = ai.value.provider ?? 'ollama'
+    for (const p of Object.keys(hostedBaseUrl.value)) {
+      hostedBaseUrl.value[p] = ai.value.hosted?.[p]?.base_url ?? ''
+      hostedApiKey.value[p] = ''
+    }
   } catch (e) {
     error.value = e instanceof ApiException ? e.error.message : 'Failed to load AI config'
   }
@@ -161,12 +173,19 @@ async function saveAi() {
   error.value = ''
   saved.value = false
   try {
+    const body: Record<string, unknown> = { provider: selectedProvider.value, models: aiModels.value }
+    for (const p of Object.keys(hostedBaseUrl.value)) {
+      body[`${p}_base_url`] = hostedBaseUrl.value[p]
+      if (hostedApiKey.value[p]) body[`${p}_api_key`] = hostedApiKey.value[p]
+    }
     const res = await apiRequest<{ data: { defaults: AiConfig['defaults'] } }>('/ai/config', {
       method: 'PUT',
-      body: JSON.stringify({ provider: ai.value?.provider, models: aiModels.value }),
+      body: JSON.stringify(body),
     })
     aiModels.value = { ...res.data.defaults.models }
+    for (const p of Object.keys(hostedApiKey.value)) hostedApiKey.value[p] = ''
     saved.value = true
+    await loadAi()
     setTimeout(() => (saved.value = false), 2000)
   } catch (e) {
     error.value = e instanceof ApiException ? e.error.message : 'Save failed'
@@ -273,11 +292,44 @@ onMounted(() => {
 
       <!-- AI / MODELS -->
       <div v-else-if="tab === 'ai' && ai" class="space-y-4 max-w-2xl">
+        <!-- Provider selection -->
+        <div class="bg-white rounded-xl border border-slate-100 p-6 space-y-3">
+          <h3 class="font-semibold text-slate-700">AI Provider</h3>
+          <div class="flex gap-2">
+            <button v-for="p in (ai.available_providers.length ? ai.available_providers : ['ollama', 'openai', 'claude'])" :key="p"
+              @click="selectedProvider = p" class="flex-1 text-sm rounded-lg border px-3 py-2 text-center transition"
+              :class="selectedProvider === p ? 'border-airr-400 bg-airr-50 text-airr-700 font-medium' : 'border-slate-200 text-slate-500 hover:border-slate-300'">
+              {{ PROVIDER_LABELS[p] ?? p }}
+              <span class="block text-[10px] font-normal text-slate-400">{{ p === 'ollama' ? 'On-premise, no data leaves the server' : 'Hosted API, sends data off-premises' }}</span>
+            </button>
+          </div>
+          <div v-if="selectedProvider !== 'ollama'" class="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <p class="text-xs text-amber-700">⚠ Choosing {{ PROVIDER_LABELS[selectedProvider] ?? selectedProvider }} sends report/template prompts to a third-party service — this deviates from AIRR's on-premise-by-default posture. Only use with informed consent.</p>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Base URL</label>
+              <input v-model="hostedBaseUrl[selectedProvider]" placeholder="https://api.example.com" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">
+                API key <span v-if="ai.hosted[selectedProvider]?.api_key_set" class="text-slate-400 font-normal">(already set — leave blank to keep it)</span>
+              </label>
+              <input v-model="hostedApiKey[selectedProvider]" type="password" placeholder="sk-…" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
+            </div>
+          </div>
+          <div class="flex items-center gap-3 pt-1">
+            <button @click="saveAi" :disabled="saving"
+              class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-4 py-2 disabled:opacity-50">
+              {{ saving ? 'Saving…' : 'Save provider' }}
+            </button>
+            <span v-if="saved" class="text-sm text-emerald-600">✓ Saved</span>
+          </div>
+        </div>
+
         <div class="bg-white rounded-xl border border-slate-100 p-6 space-y-4">
           <div class="flex items-center justify-between">
             <div>
               <h3 class="font-semibold text-slate-700">System-default models</h3>
-              <p class="text-xs text-slate-400">On-premise via <span class="font-medium capitalize">{{ ai.provider }}</span> · no external AI APIs. Projects may override these.</p>
+              <p class="text-xs text-slate-400">Active provider: <span class="font-medium capitalize">{{ ai.provider }}</span>. Projects may override these.</p>
             </div>
           </div>
           <div class="space-y-3">

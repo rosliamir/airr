@@ -22,11 +22,14 @@ class User extends Authenticatable
     const STATUS_SUSPENDED = 'suspended';
 
     // Account classification (NOT an access grant — access comes from roles).
+    // Project-visibility tier: super_admin sees all; system_admin sees only projects
+    // they created; user_level_1/2 see projects they're a member of (or created).
+    const TYPE_SUPER_ADMIN = 'super_admin';
     const TYPE_SYSTEM_ADMIN = 'system_admin';
-    const TYPE_ADMIN = 'admin';
-    const TYPE_USER = 'user';
+    const TYPE_USER_LEVEL_1 = 'user_level_1';
+    const TYPE_USER_LEVEL_2 = 'user_level_2';
 
-    const USER_TYPES = [self::TYPE_SYSTEM_ADMIN, self::TYPE_ADMIN, self::TYPE_USER];
+    const USER_TYPES = [self::TYPE_SUPER_ADMIN, self::TYPE_SYSTEM_ADMIN, self::TYPE_USER_LEVEL_1, self::TYPE_USER_LEVEL_2];
 
     public function isActive(): bool
     {
@@ -35,11 +38,12 @@ class User extends Authenticatable
 
     /**
      * Can this account see every user/project (bypass owner+group scoping)?
-     * system_admin & admin user_types, or the superadmin role.
+     * Only the super_admin user_type, or the superadmin role. system_admin is
+     * NOT included — it is scoped to its own created projects (Project::scopeVisibleTo()).
      */
     public function seesEverything(): bool
     {
-        return in_array($this->user_type, [self::TYPE_SYSTEM_ADMIN, self::TYPE_ADMIN], true)
+        return $this->user_type === self::TYPE_SUPER_ADMIN
             || $this->roles()->where('slug', 'superadmin')->exists();
     }
 

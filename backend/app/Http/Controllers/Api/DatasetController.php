@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Traits\ApiResponse;
 use App\Models\Dataset;
 use App\Models\DataSource;
+use App\Models\Project;
 use App\Services\AuditService;
 use App\Services\ConnectorService;
 use Illuminate\Http\JsonResponse;
@@ -20,9 +21,24 @@ class DatasetController extends Controller
 
     public function __construct(protected AuditService $audit, protected ConnectorService $connector) {}
 
-    public function index(DataSource $dataSource): JsonResponse
+    public function index(Request $request, DataSource $dataSource): JsonResponse
     {
+        $this->authorizeVisible($request->user(), $dataSource);
+
         return $this->sendOk($dataSource->datasets()->orderBy('name')->get()->map(fn (Dataset $d) => $this->row($d)));
+    }
+
+    // Mirrors DataSourceController's index() visibility condition: a data source is
+    // visible if the viewer created it, or its project is visible to the viewer.
+    private function authorizeVisible($viewer, DataSource $dataSource): void
+    {
+        if ($viewer->seesEverything() || $dataSource->created_by === $viewer->id) {
+            return;
+        }
+        if ($dataSource->project_id && Project::whereKey($dataSource->project_id)->visibleTo($viewer)->exists()) {
+            return;
+        }
+        abort(403);
     }
 
     public function store(Request $request, DataSource $dataSource): JsonResponse

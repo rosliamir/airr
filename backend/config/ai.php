@@ -1,7 +1,11 @@
 <?php
 
 // AIRR AI provider & model resolution (FR-M15.6 / FR-M15.8).
-// On-premise only (Ollama) — NO external AI APIs, no data egress.
+// Default posture is on-premise only (Ollama) — no external AI APIs, no data
+// egress. 'openai' and 'claude' (API-key based, hosted) are also registered
+// below as explicit, admin-opt-in alternatives (Settings > AI/Models >
+// Provider) — choosing either deliberately sends data off-premises; see
+// App\Services\Ai\OpenAiProvider / ClaudeProvider's docblocks.
 // Per-task system defaults; projects may override via projects.ai_config
 // (FR-M14.5), resolved through App\Services\Ai\ModelResolver.
 
@@ -28,6 +32,18 @@ return [
             'driver'  => \App\Services\Ai\OllamaProvider::class,
             'url'     => env('OLLAMA_URL', 'http://localhost:11434'),
             'timeout' => (int) env('AI_TIMEOUT', 120),
+        ],
+        'openai' => [
+            'driver'   => \App\Services\Ai\OpenAiProvider::class,
+            'base_url' => env('AI_OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+            'api_key'  => env('AI_OPENAI_API_KEY', ''),
+            'timeout'  => (int) env('AI_TIMEOUT', 120),
+        ],
+        'claude' => [
+            'driver'   => \App\Services\Ai\ClaudeProvider::class,
+            'base_url' => env('AI_CLAUDE_BASE_URL', 'https://api.anthropic.com'),
+            'api_key'  => env('AI_CLAUDE_API_KEY', ''),
+            'timeout'  => (int) env('AI_TIMEOUT', 120),
         ],
     ],
 

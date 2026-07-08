@@ -41,11 +41,19 @@ class Project extends Model
     }
 
     /**
-     * Owner+membership visibility (FR-M14.3): projects the viewer created or is a
-     * direct member of. Caller checks $viewer->seesEverything() first to bypass.
+     * Tiered visibility (FR-M14.3). Caller checks $viewer->seesEverything() first to
+     * bypass entirely (super_admin / superadmin role).
+     * - system_admin: ONLY projects they created (per RBAC diagram — no membership
+     *   fallback for this tier).
+     * - user_level_1 / user_level_2 (and anything else): projects they created OR
+     *   are a direct member of — the original owner+membership behavior.
      */
     public function scopeVisibleTo($query, User $viewer)
     {
+        if ($viewer->user_type === User::TYPE_SYSTEM_ADMIN) {
+            return $query->where('created_by', $viewer->id);
+        }
+
         return $query->where(function ($q) use ($viewer) {
             $q->where('created_by', $viewer->id)
                 ->orWhereHas('users', fn ($u) => $u->where('users.id', $viewer->id));

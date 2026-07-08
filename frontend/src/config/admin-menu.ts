@@ -53,7 +53,6 @@ export const adminMenu: MenuGroup[] = [
       { label: 'Projects', route: 'projects', icon: 'FolderKanban', module: 'M14', permission: 'projects.view', phase: 0, ready: true },
       { label: 'Users & Roles', route: 'users', icon: 'Users', module: 'M14', permission: 'users.manage', feature: 'rbac_full', phase: 0, ready: true },
       { label: 'Menu', route: 'menus', icon: 'Menu', module: 'M14', permission: 'menus.manage', phase: 0, ready: true },
-      { label: 'Constants', route: 'constants', icon: 'Hash', module: 'M14', permission: 'settings.manage', phase: 1, ready: true },
       { label: 'Audit Log', route: 'audit', icon: 'ScrollText', module: 'M1', permission: 'audit.read', phase: 0, ready: true },
       { label: 'Settings', route: 'settings', icon: 'Settings', module: 'M14', permission: 'settings.manage', phase: 0, ready: true },
     ],

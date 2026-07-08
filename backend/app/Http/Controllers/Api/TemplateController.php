@@ -20,6 +20,7 @@ class TemplateController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $viewer = $request->user();
         $query = Template::with('project:id,code,name', 'creator:id,name');
 
         if ($request->boolean('with_trashed')) {
@@ -29,6 +30,14 @@ class TemplateController extends Controller
         // Global (project_id IS NULL) + project-scoped visible to current user
         if ($pid = $request->input('project_id')) {
             $query->where(fn ($q) => $q->whereNull('project_id')->orWhere('project_id', $pid));
+        }
+
+        // Owner+project visibility (mirrors DataSourceController/KnowledgeBaseController):
+        // a global template is only visible to its creator; a project-scoped one is
+        // visible if the project itself is visible to the viewer.
+        if (! $viewer->seesEverything()) {
+            $query->where(fn ($q) => $q->where('created_by', $viewer->id)
+                ->orWhereHas('project', fn ($p) => $p->visibleTo($viewer)));
         }
 
         return $this->sendOk($query->orderBy('name')->get()->map(fn ($t) => $this->row($t)));
@@ -126,9 +135,18 @@ class TemplateController extends Controller
         $system = 'You write short HTML snippets for a report template section (' . $data['section'] . '). '
             . 'Return only the HTML fragment, no markdown fences, no explanation. '
             . 'You may use placeholders like {{SYSTEM:DATE}}, {{GLOBAL:KEY}}, {{PROJECT:KEY}} where relevant.';
-        $html = $ai->generate($model, $data['prompt'], ['system' => $system, 'temperature' => 0.2]);
+        try {
+            $html = $ai->generate($model, $data['prompt'], ['system' => $system, 'temperature' => 0.2]);
+        } catch (\Throwable $e) {
+            return $this->sendError(503, 'AI_UNAVAILABLE', 'Could not reach the AI provider: ' . $e->getMessage());
+        }
 
-        return $this->sendOk(['html' => trim($html)]);
+        $html = trim($html);
+        if (preg_match('/^```(?:html)?\s*(.*?)\s*```$/s', $html, $m)) {
+            $html = trim($m[1]);
+        }
+
+        return $this->sendOk(['html' => $html]);
     }
 
     private function validateTemplate(Request $request): array

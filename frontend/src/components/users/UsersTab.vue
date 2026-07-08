@@ -18,7 +18,7 @@ type UserRow = {
   name: string
   email: string
   status: 'pending' | 'active' | 'suspended'
-  user_type: 'system_admin' | 'admin' | 'user'
+  user_type: string
   auth_provider: string
   avatar_url: string | null
   roles: Role[]
@@ -42,7 +42,7 @@ const pendingCount = computed(() => users.value.filter((u) => u.status === 'pend
 const showForm = ref(false)
 const editing = ref<UserRow | null>(null)
 const form = ref({
-  name: '', email: '', password: '', user_type: 'user',
+  name: '', email: '', password: '', user_type: 'user_level_1',
   status: 'active', roles: [] as number[],
 })
 
@@ -68,7 +68,7 @@ async function load() {
 
 function openCreate() {
   editing.value = null
-  form.value = { name: '', email: '', password: '', user_type: 'user', status: 'active', roles: [] }
+  form.value = { name: '', email: '', password: '', user_type: 'user_level_1', status: 'active', roles: [] }
   showForm.value = true
 }
 function openEdit(u: UserRow) {

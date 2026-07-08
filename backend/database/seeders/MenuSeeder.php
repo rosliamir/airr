@@ -35,7 +35,6 @@ class MenuSeeder extends Seeder
                 ['Menu', 'menus', 'Menu', 'M14', 'menus.manage', null],
                 ['Audit Log', 'audit', 'ScrollText', 'M1', 'audit.read', null],
                 ['Settings', 'settings', 'Settings', 'M14', 'settings.manage', null],
-                ['Constants', 'constants', 'Hash', 'M14', 'settings.manage', null],
             ]],
         ];
 

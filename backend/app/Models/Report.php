@@ -5,23 +5,42 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 // M6 (FR-M6.1) — report definition. `definition` holds the portable JSON the
 // renderer executes and the Studio edits.
 class Report extends Model
 {
+    use SoftDeletes;
+
     const TYPES = ['table', 'grouped', 'kpi', 'matrix', 'chart', 'document'];
 
     const STATUS_DRAFT = 'draft';
     const STATUS_PUBLISHED = 'published';
 
+    const LAYOUTS = ['portrait', 'landscape'];
+    const PRINTOUT_SIZES = ['a4', 'a3', 'a2', 'b5', 'custom'];
+    const OUTPUT_FORMATS = ['pdf', 'excel', 'csv'];
+
     protected $fillable = [
-        'project_id', 'dataset_id', 'name', 'description', 'type', 'definition', 'status', 'created_by',
+        'project_id', 'dataset_id', 'name', 'description', 'type', 'definition', 'status', 'archived_at', 'created_by',
+        'version', 'layout', 'printout_size', 'printout_width', 'printout_height', 'output_formats', 'locked',
     ];
 
     protected function casts(): array
     {
-        return ['definition' => 'array'];
+        return [
+            'definition' => 'array', 'archived_at' => 'datetime',
+            'output_formats' => 'array', 'locked' => 'boolean',
+        ];
+    }
+
+    // Templates (Author > Templates) attached to this report — e.g. one for the
+    // report header, another for the page header, etc. Order-agnostic; the
+    // renderer/compiler decides how attached templates combine (future M7/M8).
+    public function templates(): BelongsToMany
+    {
+        return $this->belongsToMany(Template::class)->withTimestamps();
     }
 
     public function project(): BelongsTo
