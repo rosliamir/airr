@@ -122,8 +122,12 @@ class ConnectorService
     }
 
     // FR-M2.5 — run a dataset with runtime parameter values; returns paginated rows
-    // (default 20/page) plus total count for page navigation.
-    public function run(Dataset $dataset, array $paramValues, int $page = 1, int $perPage = 20): array
+    // (default 20/page) plus total count for page navigation. Pass $all=true to
+    // fetch every matching row unpaginated — used for actual report execution
+    // (Run/Preview/export), where the output must reflect the real, complete
+    // data rather than the small page shown in the Dataset module's own
+    // testing/preview screen.
+    public function run(Dataset $dataset, array $paramValues, int $page = 1, int $perPage = 20, bool $all = false): array
     {
         $source = $dataset->dataSource;
         $params = $this->resolveParams($dataset, $paramValues);
@@ -131,17 +135,17 @@ class ConnectorService
         $perPage = max(1, min(self::PREVIEW_LIMIT, $perPage));
 
         if ($source->isFile()) {
-            return $this->runFile($source, $params, $page, $perPage);
+            return $this->runFile($source, $params, $page, $perPage, $all);
         }
 
         return $source->isDatabase()
-            ? $this->runSql($source, $dataset, $params, $page, $perPage)
+            ? $this->runSql($source, $dataset, $params, $page, $perPage, $all)
             : $this->runApi($source, $dataset, $params, $page, $perPage);
     }
 
     // File datasets read the parsed rows; params matching a column filter by
     // equality (simple, case-insensitive). Empty params return all rows.
-    private function runFile(DataSource $source, array $params, int $page, int $perPage): array
+    private function runFile(DataSource $source, array $params, int $page, int $perPage, bool $all = false): array
     {
         $parsed = $this->parseFile($source);
         $rows = $parsed['rows'];
@@ -163,14 +167,16 @@ class ConnectorService
         }
 
         $total = count($rows);
-        $rows = array_slice($rows, ($page - 1) * $perPage, $perPage);
+        if (! $all) {
+            $rows = array_slice($rows, ($page - 1) * $perPage, $perPage);
+        }
 
-        return $this->paginated($parsed['columns'], $rows, $total, $page, $perPage);
+        return $this->paginated($parsed['columns'], $rows, $total, $page, $all ? $total : $perPage);
     }
 
     // --- DB ---
 
-    private function runSql(DataSource $source, Dataset $dataset, array $params, int $page, int $perPage): array
+    private function runSql(DataSource $source, Dataset $dataset, array $params, int $page, int $perPage, bool $all = false): array
     {
         $sql = trim((string) $dataset->query);
         $this->guardSelect($sql);
@@ -178,10 +184,10 @@ class ConnectorService
         try {
             $conn = $this->dbConnection($source);
             $offset = ($page - 1) * $perPage;
-            $pagedSql = $this->applyPagination($sql, $source->type, $offset, $perPage);
+            $execSql = $all ? $sql : $this->applyPagination($sql, $source->type, $offset, $perPage);
 
             try {
-                $rows = $conn->select($pagedSql, $params);
+                $rows = $conn->select($execSql, $params);
             } catch (\Illuminate\Database\QueryException $e) {
                 if (str_contains($e->getMessage(), 'ORA-00918') || str_contains($e->getMessage(), 'ambiguously defined')) {
                     throw new \RuntimeException(
@@ -194,13 +200,15 @@ class ConnectorService
                 throw $e;
             }
 
-            $total = null;
-            try {
-                $countRow = $conn->selectOne("SELECT COUNT(*) AS total FROM ({$sql}) airr_count", $params);
-                $total = (int) ((array) $countRow)['total'];
-            } catch (\Throwable) {
-                // Best-effort — some hand-written queries won't wrap cleanly for COUNT; page nav
-                // just won't know the exact last page in that case, rows themselves still work.
+            $total = $all ? count($rows) : null;
+            if (! $all) {
+                try {
+                    $countRow = $conn->selectOne("SELECT COUNT(*) AS total FROM ({$sql}) airr_count", $params);
+                    $total = (int) ((array) $countRow)['total'];
+                } catch (\Throwable) {
+                    // Best-effort — some hand-written queries won't wrap cleanly for COUNT; page nav
+                    // just won't know the exact last page in that case, rows themselves still work.
+                }
             }
 
             // Strip the internal ROWNUM bookkeeping column added for Oracle pagination.
@@ -216,7 +224,7 @@ class ConnectorService
                 $rows,
                 $total,
                 $page,
-                $perPage,
+                $all ? $total : $perPage,
             );
         } finally {
             $this->purge($source);

@@ -166,6 +166,8 @@ function onResizeEnd() {
 const fixedParamsEnabled = ref<Record<string, boolean>>({})
 const requireParamScreen = ref(true)
 const customParams = ref<CustomParam[]>([])
+// Runtime values entered on the Preview parameter screen for custom params, keyed by param id.
+const customParamValues = ref<Record<string, string | boolean>>({})
 const showParamModal = ref(false)
 const editingParam = ref<CustomParam | null>(null)
 const paramForm = ref<CustomParam>({ id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true })
@@ -480,6 +482,7 @@ async function openReport(r: Report) {
     testConnResult.value = ''
     fixedParamsEnabled.value = (def.fixed_parameters_enabled as Record<string, boolean>) ?? {}
     customParams.value = (def.custom_parameters as CustomParam[]) ?? []
+    customParamValues.value = Object.fromEntries(customParams.value.map(p => [p.id, p.default_value ?? (p.type === 'checkbox' ? false : '')]))
     requireParamScreen.value = (def.require_parameter_screen as boolean) ?? true
     // seed role grants
     const map: Record<number, { view: boolean; edit: boolean; run: boolean }> = {}
@@ -589,6 +592,10 @@ const activePreviewParams = computed(() => {
   }
   return out
 })
+// Which dataset/custom parameters actually appear on the Preview parameter
+// screen — whatever's enabled in the editor's Parameters panel, nothing more.
+const enabledDatasetParams = computed(() => (boundDataset.value?.parameters ?? []).filter(p => fixedParamsEnabled.value[p.name] ?? true))
+const enabledCustomParams = computed(() => customParams.value.filter(p => p.enabled))
 
 async function openPreviewModal() {
   if (!selected.value) return
@@ -801,6 +808,7 @@ async function restoreHistory(entry: HistoryEntry) {
   // with whatever was left in memory from before the restore.
   fixedParamsEnabled.value = (def.fixed_parameters_enabled as Record<string, boolean>) ?? {}
   customParams.value = (def.custom_parameters as CustomParam[]) ?? []
+  customParamValues.value = Object.fromEntries(customParams.value.map(p => [p.id, p.default_value ?? (p.type === 'checkbox' ? false : '')]))
   requireParamScreen.value = (def.require_parameter_screen as boolean) ?? true
   promptHistory.value = (def.prompt_history as PromptHistoryEntry[]) ?? promptHistory.value
   editTemplateHeaderId.value = (def.template_header_id as number) ?? null
@@ -911,13 +919,17 @@ function saveParam() {
   }
   if (editingParam.value) {
     customParams.value = customParams.value.map(p => p.id === editingParam.value!.id ? { ...paramForm.value } : p)
+    customParamValues.value[editingParam.value.id] = paramForm.value.default_value ?? (paramForm.value.type === 'checkbox' ? false : '')
   } else {
-    customParams.value = [...customParams.value, { ...paramForm.value, id: `p${Date.now()}` }]
+    const id = `p${Date.now()}`
+    customParams.value = [...customParams.value, { ...paramForm.value, id }]
+    customParamValues.value[id] = paramForm.value.default_value ?? (paramForm.value.type === 'checkbox' ? false : '')
   }
   showParamModal.value = false
 }
 function deleteParam(id: string) {
   customParams.value = customParams.value.filter(p => p.id !== id)
+  delete customParamValues.value[id]
 }
 function toggleCustomParamEnabled(id: string) {
   customParams.value = customParams.value.map(p => p.id === id ? { ...p, enabled: !p.enabled } : p)
@@ -1879,66 +1891,42 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
           </div>
         </div>
 
-        <!-- Step 1: parameter screen — nothing runs until Run is clicked -->
+        <!-- Step 1: parameter screen — which parameters appear here (and whether
+             this screen shows at all) is decided in the editor's Parameters
+             panel; this is just the runtime value-entry form for whatever was
+             enabled there. Layout/template header/footer aren't "parameters"
+             a user fills in — they're applied automatically when rendering. -->
         <div v-if="!previewModalStarted" class="flex-1 overflow-y-auto p-6 flex items-start justify-center">
           <div class="w-full max-w-md space-y-3">
             <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Parameters</p>
-            <p class="text-[10px] text-slate-400 mb-1">Tick a parameter to include it when running — untick to ignore its value.</p>
-            <div v-if="!(boundDataset?.parameters ?? []).length" class="text-xs text-slate-400">No runtime parameters for this dataset — just click Run.</div>
-            <div v-for="p in (boundDataset?.parameters ?? [])" :key="p.name" class="flex items-center gap-2">
-              <input type="checkbox" :checked="fixedParamsEnabled[p.name] ?? true"
-                @change="fixedParamsEnabled = { ...fixedParamsEnabled, [p.name]: !(fixedParamsEnabled[p.name] ?? true) }"
-                class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
-              <div class="min-w-0 flex-1">
-                <label class="block text-[10px] text-slate-500 mb-0.5 truncate">{{ p.label || p.name }}</label>
-                <input v-model="runParams[p.name]"
-                  :type="p.type === 'number' ? 'number' : p.type === 'date' ? 'date' : 'text'"
-                  :disabled="!(fixedParamsEnabled[p.name] ?? true)"
-                  class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300 disabled:bg-slate-50 disabled:text-slate-300" />
+            <div v-if="!enabledDatasetParams.length && !enabledCustomParams.length" class="text-xs text-slate-400">No parameters — just click Run.</div>
+
+            <div v-for="p in enabledDatasetParams" :key="p.name">
+              <label class="block text-[10px] text-slate-500 mb-0.5">{{ p.label || p.name }}</label>
+              <input v-model="runParams[p.name]"
+                :type="p.type === 'number' ? 'number' : p.type === 'date' ? 'date' : 'text'"
+                class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300" />
+            </div>
+
+            <div v-for="p in enabledCustomParams" :key="p.id">
+              <label class="block text-[10px] text-slate-500 mb-0.5">{{ p.title }}</label>
+              <select v-if="p.type === 'dropdown'" v-model="customParamValues[p.id]"
+                class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300">
+                <option v-for="o in (p.options ?? [])" :key="o" :value="o">{{ o }}</option>
+              </select>
+              <div v-else-if="p.type === 'radio'" class="flex flex-wrap gap-3 pt-0.5">
+                <label v-for="o in (p.options ?? [])" :key="o" class="flex items-center gap-1 text-xs text-slate-600">
+                  <input type="radio" :name="`cp_${p.id}`" :value="o" v-model="customParamValues[p.id]" /> {{ o }}
+                </label>
               </div>
+              <label v-else-if="p.type === 'checkbox'" class="flex items-center gap-1.5 text-xs text-slate-600 pt-0.5">
+                <input type="checkbox" v-model="customParamValues[p.id]" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" /> Yes
+              </label>
+              <input v-else v-model="customParamValues[p.id]"
+                :type="p.type === 'date' ? 'date' : p.type === 'datetime' ? 'datetime-local' : p.type === 'time' ? 'time' : p.type === 'amount' ? 'number' : 'text'"
+                class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300" />
             </div>
 
-            <!-- Fixed (layout/template) — same toggles as the editor's Parameters
-                 panel, so what's ticked there is reflected here too. -->
-            <div class="pt-2 border-t border-slate-100 space-y-1.5">
-              <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Fixed</p>
-              <label class="flex items-center gap-2 text-xs text-slate-600">
-                <input type="checkbox" :checked="fixedParamsEnabled['layout_type'] ?? true"
-                  @change="fixedParamsEnabled = { ...fixedParamsEnabled, layout_type: !(fixedParamsEnabled['layout_type'] ?? true) }"
-                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
-                Layout type — <span class="text-slate-400 capitalize">{{ editLayout }}</span>
-              </label>
-              <label class="flex items-center gap-2 text-xs text-slate-600">
-                <input type="checkbox" :checked="fixedParamsEnabled['layout_size'] ?? true"
-                  @change="fixedParamsEnabled = { ...fixedParamsEnabled, layout_size: !(fixedParamsEnabled['layout_size'] ?? true) }"
-                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
-                Layout size — <span class="text-slate-400 uppercase">{{ editPrintoutSize }}</span>
-              </label>
-              <label class="flex items-center gap-2 text-xs text-slate-600">
-                <input type="checkbox" :checked="fixedParamsEnabled['template_header'] ?? true"
-                  @change="fixedParamsEnabled = { ...fixedParamsEnabled, template_header: !(fixedParamsEnabled['template_header'] ?? true) }"
-                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
-                Template header — <span class="text-slate-400">{{ allTemplates.find(t => t.id === editTemplateHeaderId)?.name ?? '— none —' }}</span>
-              </label>
-              <label class="flex items-center gap-2 text-xs text-slate-600">
-                <input type="checkbox" :checked="fixedParamsEnabled['template_footer'] ?? true"
-                  @change="fixedParamsEnabled = { ...fixedParamsEnabled, template_footer: !(fixedParamsEnabled['template_footer'] ?? true) }"
-                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
-                Template footer — <span class="text-slate-400">{{ allTemplates.find(t => t.id === editTemplateFooterId)?.name ?? '— none —' }}</span>
-              </label>
-            </div>
-
-            <!-- Custom (report-defined) parameters -->
-            <div v-if="customParams.length" class="pt-2 border-t border-slate-100 space-y-1.5">
-              <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Custom</p>
-              <label v-for="p in customParams" :key="p.id" class="flex items-center gap-2 text-xs text-slate-600">
-                <input type="checkbox" :checked="p.enabled" @change="toggleCustomParamEnabled(p.id)"
-                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
-                {{ p.title }} <span class="text-[10px] text-slate-400">({{ p.type }})</span>
-              </label>
-            </div>
-
-            <p class="text-[10px] text-slate-400 pt-1">Datasource: {{ selected?.dataset?.name ?? 'none' }}</p>
             <p v-if="previewModalError" class="text-sm text-airr-700 bg-airr-50 rounded-lg px-3 py-2">{{ previewModalError }}</p>
             <div class="flex justify-end gap-2 pt-2">
               <button @click="exitPreviewModal" class="text-sm text-slate-500 px-3 py-2">Cancel</button>
