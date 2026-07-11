@@ -98,7 +98,9 @@ class DatasetController extends Controller
             'action'          => $r->action,
             'snapshot'        => json_decode($r->snapshot, true),
             'changed_by_name' => $r->changed_by_name,
-            'created_at'      => $r->created_at,
+            // DB::table() returns a raw "Y-m-d H:i:s" string with no timezone marker —
+            // force explicit UTC ISO8601 so the frontend converts to local time correctly.
+            'created_at'      => \Carbon\Carbon::parse($r->created_at, 'UTC')->toIso8601String(),
         ]));
     }
 
@@ -106,18 +108,18 @@ class DatasetController extends Controller
     {
         $rows = DB::table('audit_logs as a')
             ->leftJoin('users as u', 'u.id', '=', 'a.user_id')
-            ->where('a.subject_type', Dataset::class)
-            ->where('a.subject_id', $dataset->id)
+            ->where('a.object_type', Dataset::class)
+            ->where('a.object_id', (string) $dataset->id)
             ->orderByDesc('a.created_at')
             ->limit(100)
-            ->get(['a.id', 'a.event', 'a.properties', 'a.created_at', 'u.name as user_name']);
+            ->get(['a.id', 'a.action', 'a.new_values', 'a.created_at', 'u.name as user_name']);
 
         return $this->sendOk($rows->map(fn ($r) => [
             'id'         => $r->id,
-            'event'      => $r->event,
-            'properties' => json_decode($r->properties ?? '{}', true),
+            'event'      => $r->action,
+            'properties' => json_decode($r->new_values ?? '{}', true),
             'user_name'  => $r->user_name ?? 'System',
-            'created_at' => $r->created_at,
+            'created_at' => \Carbon\Carbon::parse($r->created_at, 'UTC')->toIso8601String(),
         ]));
     }
 

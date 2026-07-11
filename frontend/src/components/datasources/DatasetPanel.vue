@@ -237,7 +237,7 @@ async function runPreview(d: Dataset, page = 1) {
           <div v-for="e in logEntries" :key="e.id" class="border border-slate-100 rounded-lg p-3 text-xs">
             <div class="flex justify-between items-center mb-1">
               <span class="font-medium text-slate-700">{{ e.action ?? e.event }}</span>
-              <span class="text-slate-400">{{ e.changed_by_name ?? e.user_name }} · {{ e.created_at }}</span>
+              <span class="text-slate-400">{{ e.changed_by_name ?? e.user_name }} · {{ new Date(e.created_at).toLocaleString() }}</span>
             </div>
             <pre v-if="e.snapshot" class="text-[10px] text-slate-500 whitespace-pre-wrap break-all">{{ JSON.stringify(e.snapshot, null, 2) }}</pre>
             <pre v-else-if="e.properties && Object.keys(e.properties).length" class="text-[10px] text-slate-500 whitespace-pre-wrap break-all">{{ JSON.stringify(e.properties, null, 2) }}</pre>

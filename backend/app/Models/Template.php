@@ -13,7 +13,7 @@ class Template extends Model
     protected $fillable = [
         'name', 'description', 'project_id', 'data_source_id', 'dataset_id',
         'header', 'body', 'footer', 'page_header', 'page_footer',
-        'groups', 'parameter_screen', 'meta',
+        'groups', 'parameter_screen', 'meta', 'tags', 'archived_at',
         'created_by',
     ];
     // Note: group_header/group_footer columns are deprecated in favour of `groups`
@@ -23,6 +23,8 @@ class Template extends Model
     protected $casts = [
         'groups' => 'array',
         'meta'   => 'array',
+        'tags'   => 'array', // hashtags, e.g. ["kutipan", "pbt"] — for search/filter
+        'archived_at' => 'datetime',
     ];
 
     public function project(): BelongsTo { return $this->belongsTo(Project::class); }

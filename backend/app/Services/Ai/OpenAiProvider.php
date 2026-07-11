@@ -48,7 +48,14 @@ class OpenAiProvider implements AiProvider
         if (isset($options['system'])) {
             $messages[] = ['role' => 'system', 'content' => $options['system']];
         }
-        $messages[] = ['role' => 'user', 'content' => $prompt];
+        if ($image = $options['image'] ?? null) {
+            $messages[] = ['role' => 'user', 'content' => [
+                ['type' => 'text', 'text' => $prompt],
+                ['type' => 'image_url', 'image_url' => ['url' => "data:{$image['mime']};base64,{$image['data']}"]],
+            ]];
+        } else {
+            $messages[] = ['role' => 'user', 'content' => $prompt];
+        }
 
         $payload = ['model' => $model, 'messages' => $messages];
         if (isset($options['temperature'])) {

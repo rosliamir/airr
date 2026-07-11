@@ -47,6 +47,9 @@ class OllamaProvider implements AiProvider
         if (isset($options['system'])) {
             $payload['system'] = $options['system'];
         }
+        if ($image = $options['image'] ?? null) {
+            $payload['images'] = [$image['data']]; // multimodal models (e.g. llava) only
+        }
         if ($opts = array_intersect_key($options, array_flip(['temperature', 'top_p', 'top_k', 'num_ctx', 'seed']))) {
             $payload['options'] = $opts;
         }

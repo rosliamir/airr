@@ -1,30 +1,36 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
+import { onMounted, onUnmounted, ref, computed, watch, inject } from 'vue'
 import AdminLayout from '../layouts/AdminLayout.vue'
-import { apiRequest, uploadFile, ApiException } from '../api/client'
+import { apiRequest, uploadFile, downloadFile, ApiException } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 type Ref2 = { id: number; name: string; code?: string }
 type Grant = { role_id: number; name?: string; view: boolean; edit: boolean; run: boolean }
 type Dataset = { id: number; name: string; data_source_id?: number; parameters?: { name: string; label?: string; type?: string; default?: string }[] }
 type DataSourceOpt = { id: number; name: string; type?: string; config_summary?: Record<string, unknown> }
+type ReportDataset = { id: number; name: string; data_source_id?: number | null }
 type Report = {
   id: number; name: string; description?: string; type: string; status: string
-  project?: Ref2 | null; dataset?: Ref2 | null; creator?: Ref2 | null
+  project?: Ref2 | null; dataset?: ReportDataset | null; creator?: Ref2 | null
   definition?: Record<string, unknown>; permissions?: Grant[]; updated_at?: string
   archived_at?: string | null; deleted_at?: string | null
-  version?: number; layout?: string; printout_size?: string
+  version?: number; version_label?: string; layout?: string; printout_size?: string
   printout_width?: number | null; printout_height?: number | null
   output_formats?: string[]; locked?: boolean; templates?: Ref2[]
+  tags?: string[]
 }
 type TemplateOpt = { id: number; name: string }
 type CustomParam = {
-  id: string; title: string; type: 'text' | 'dropdown' | 'checkbox' | 'radio'
+  id: string; title: string
+  type: 'text' | 'dropdown' | 'checkbox' | 'radio' | 'date' | 'datetime' | 'time' | 'amount'
   default_value?: string | boolean | null; options?: string[]
+  min?: number | null; max?: number | null
+  source_type?: 'json' | 'datasource'
   data_source_id?: number | null; dataset_id?: number | null; data_column?: string | null
   remark?: string; enabled: boolean
 }
-type HistoryEntry = { id: number; action: string; snapshot: Record<string, unknown>; changed_by_name: string; created_at: string }
+type Constant = { id: number; scope: string; key: string; label?: string }
+type HistoryEntry = { id: number; action: string; snapshot: Record<string, unknown>; version_label?: string; changed_by_name: string; created_at: string }
 type LogEntry   = { id: number; event: string; properties: Record<string, unknown>; user_name: string; created_at: string }
 
 const auth = useAuthStore()
@@ -49,6 +55,7 @@ const STATUS_BADGE: Record<string, string> = {
 
 // ── State ────────────────────────────────────────────────────────────────────
 const reports  = ref<Report[]>([])
+const deletedReports = ref<Report[]>([])
 const allDatasets = ref<Dataset[]>([])
 const dataSources = ref<DataSourceOpt[]>([])
 const roles    = ref<{ id: number; name: string }[]>([])
@@ -61,6 +68,8 @@ const runError = ref('')
 // Left panel
 const prompt   = ref('')   // stored inside definition.prompt
 const promptBusy = ref(false)
+type PromptHistoryEntry = { text: string; at: string }
+const promptHistory = ref<PromptHistoryEntry[]>([])   // stored inside definition.prompt_history — round-trips through save/reload
 
 // Collapsible sections — Permission starts closed, the rest start open.
 const openSections = ref<Record<string, boolean>>({
@@ -69,14 +78,118 @@ const openSections = ref<Record<string, boolean>>({
 })
 function toggleSection(key: string) { openSections.value[key] = !openSections.value[key] }
 
+// Drag-to-reorder sections within a panel (left: prompt/permission/parameters;
+// right: setting/template/datasource/property) — order persisted per browser.
+function loadOrder(storageKey: string, fallback: string[]): string[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem(storageKey) || 'null')
+    if (Array.isArray(stored) && fallback.every(k => stored.includes(k)) && stored.length === fallback.length) return stored
+  } catch { /* ignore malformed storage */ }
+  return [...fallback]
+}
+const leftOrder = ref<string[]>(loadOrder('airr_reports_left_order', ['prompt', 'permission', 'parameters']))
+const rightOrder = ref<string[]>(loadOrder('airr_reports_right_order', ['setting', 'template', 'datasource', 'property']))
+const dragKey = ref<string | null>(null)
+function onDragStart(key: string) { dragKey.value = key }
+function onDrop(targetKey: string, panel: 'left' | 'right') {
+  const order = panel === 'left' ? leftOrder : rightOrder
+  const storageKey = panel === 'left' ? 'airr_reports_left_order' : 'airr_reports_right_order'
+  if (!dragKey.value || dragKey.value === targetKey) return
+  const arr = [...order.value]
+  const from = arr.indexOf(dragKey.value)
+  const to = arr.indexOf(targetKey)
+  if (from === -1 || to === -1) return
+  arr.splice(from, 1)
+  arr.splice(to, 0, dragKey.value)
+  order.value = arr
+  localStorage.setItem(storageKey, JSON.stringify(arr))
+  dragKey.value = null
+}
+
+// Left/right panel whole-sidebar collapse (independent of per-section collapse).
+const leftPanelCollapsed = ref(false)
+const rightPanelCollapsed = ref(false)
+
+// Bottom History/Error/API panel: closed / normal / maximized.
+const bottomMaximized = ref(false)
+
+// Resizable panels — drag the divider between panels to resize.
+function loadWidth(storageKey: string, fallback: number): number {
+  const stored = Number(localStorage.getItem(storageKey))
+  return Number.isFinite(stored) && stored > 0 ? stored : fallback
+}
+const leftWidth = ref(loadWidth('airr_reports_left_width', 288))
+const rightWidth = ref(loadWidth('airr_reports_right_width', 288))
+const bottomHeight = ref(loadWidth('airr_reports_bottom_height', 176))
+const MIN_PANEL_WIDTH = 200
+const MAX_PANEL_WIDTH = 560
+const MIN_BOTTOM_HEIGHT = 36
+const MAX_BOTTOM_HEIGHT = 700
+
+let resizing: { kind: 'left' | 'right' | 'bottom'; startPos: number; startSize: number } | null = null
+
+function startResize(kind: 'left' | 'right' | 'bottom', e: MouseEvent) {
+  resizing = {
+    kind,
+    startPos: kind === 'bottom' ? e.clientY : e.clientX,
+    startSize: kind === 'left' ? leftWidth.value : kind === 'right' ? rightWidth.value : bottomHeight.value,
+  }
+  window.addEventListener('mousemove', onResizeMove)
+  window.addEventListener('mouseup', onResizeEnd)
+  e.preventDefault()
+}
+function onResizeMove(e: MouseEvent) {
+  if (!resizing) return
+  if (resizing.kind === 'bottom') {
+    const delta = resizing.startPos - e.clientY // dragging up (negative Y delta) grows the panel
+    bottomHeight.value = Math.min(MAX_BOTTOM_HEIGHT, Math.max(MIN_BOTTOM_HEIGHT, resizing.startSize + delta))
+    bottomMaximized.value = false
+    return
+  }
+  const delta = resizing.kind === 'left' ? e.clientX - resizing.startPos : resizing.startPos - e.clientX
+  const next = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, resizing.startSize + delta))
+  if (resizing.kind === 'left') leftWidth.value = next
+  else rightWidth.value = next
+}
+function onResizeEnd() {
+  if (resizing) {
+    const key = resizing.kind === 'left' ? 'airr_reports_left_width' : resizing.kind === 'right' ? 'airr_reports_right_width' : 'airr_reports_bottom_height'
+    const val = resizing.kind === 'left' ? leftWidth.value : resizing.kind === 'right' ? rightWidth.value : bottomHeight.value
+    localStorage.setItem(key, String(val))
+  }
+  resizing = null
+  window.removeEventListener('mousemove', onResizeMove)
+  window.removeEventListener('mouseup', onResizeEnd)
+}
+
 // Report-level parameters (left panel > Parameters)
 const fixedParamsEnabled = ref<Record<string, boolean>>({})
 const customParams = ref<CustomParam[]>([])
 const showParamModal = ref(false)
 const editingParam = ref<CustomParam | null>(null)
-const paramForm = ref<CustomParam>({ id: '', title: '', type: 'text', default_value: '', options: [], data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true })
-const paramOptionsText = ref('') // comma-separated editor for dropdown/radio options
+const paramForm = ref<CustomParam>({ id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true })
+const paramOptionsText = ref('') // comma-separated editor for dropdown/radio options (JSON source)
+const paramOptionsJsonError = ref('')
 const datasetsForParam = computed(() => allDatasets.value.filter(d => d.data_source_id === paramForm.value.data_source_id))
+
+// {{SCOPE:KEY}} constants (Settings > Constants + project-level) insertable into
+// a parameter's default value.
+const constants = ref<Constant[]>([])
+async function loadConstants() {
+  if (constants.value.length) return
+  try {
+    const params = new URLSearchParams()
+    if (selected.value?.project?.id) params.set('project_id', String(selected.value.project.id))
+    constants.value = (await apiRequest<{ data: Constant[] }>(`/constants?${params}`)).data
+  } catch { /* non-critical — constants picker just stays empty */ }
+}
+function constantToken(c: Constant): string {
+  return `{{${c.scope.toUpperCase()}:${c.key}}}`
+}
+function insertConstant(token: string) {
+  if (!token) return
+  paramForm.value.default_value = `${(paramForm.value.default_value as string) ?? ''}${token}`
+}
 
 // Center
 const preview  = ref('')
@@ -88,6 +201,7 @@ const editName   = ref('')
 const editDesc   = ref('')
 const editType   = ref('table')
 const editStatus = ref('draft')
+const editTagsText = ref('')
 const editDataSourceId = ref<number | null>(null)
 const editDatasetId = ref<number | null>(null)
 const editLayout = ref('portrait')
@@ -96,6 +210,8 @@ const editPrintoutWidth = ref<number | null>(null)
 const editPrintoutHeight = ref<number | null>(null)
 const editOutputFormats = ref<string[]>([])
 const editTemplateIds = ref<number[]>([])
+const editTemplateHeaderId = ref<number | null>(null)
+const editTemplateFooterId = ref<number | null>(null)
 const allTemplates = ref<TemplateOpt[]>([])
 const addTemplateId = ref<number | null>(null)
 const testConnResult = ref('')
@@ -127,6 +243,14 @@ const STATUS_ACCENT: Record<string, string> = {
 // ── Card grid: selection, sort, per-card menu, debug mode ────────────────────
 const selectedIds = ref<Set<number>>(new Set())
 const sortBy = ref<'-updated_at' | 'updated_at' | 'name' | '-name' | 'status'>('-updated_at')
+const reportSearchText = ref('')
+const activeReportTag = ref<string | null>(null)
+const allReportTags = computed(() => Array.from(new Set(reports.value.flatMap(r => r.tags ?? []))).sort())
+const filteredReports = computed(() => reports.value.filter(r => {
+  if (activeReportTag.value && !(r.tags ?? []).includes(activeReportTag.value)) return false
+  if (reportSearchText.value && !`${r.name} ${r.description ?? ''}`.toLowerCase().includes(reportSearchText.value.toLowerCase())) return false
+  return true
+}))
 const showArchived = ref(false)
 const openMenuId = ref<number | null>(null)
 const debugIds = ref<Set<number>>(new Set())
@@ -170,15 +294,52 @@ async function unarchiveReport(r: Report) {
   await load()
   openMenuId.value = null
 }
+// Card-list "Log" modal (Change History + Access Log), matching Templates'.
+const cardLogTarget = ref<Report | null>(null)
+const cardLogTab = ref<'history' | 'access'>('history')
+const cardLogEntries = ref<(HistoryEntry | LogEntry)[]>([])
+const cardLogBusy = ref(false)
+async function openCardLog(r: Report) {
+  openMenuId.value = null
+  cardLogTarget.value = r
+  await fetchCardLog(r, 'history')
+}
+async function fetchCardLog(r: Report, tab: 'history' | 'access') {
+  cardLogTab.value = tab
+  cardLogBusy.value = true
+  cardLogEntries.value = []
+  try {
+    const path = tab === 'history' ? `/reports/${r.id}/history` : `/reports/${r.id}/logs`
+    cardLogEntries.value = (await apiRequest<{ data: (HistoryEntry | LogEntry)[] }>(path)).data
+  } finally {
+    cardLogBusy.value = false
+  }
+}
+
 async function deleteReportCard(r: Report) {
   if (!confirm(`Delete "${r.name}"?`)) return
   await apiRequest(`/reports/${r.id}`, { method: 'DELETE' })
   await load()
   openMenuId.value = null
 }
-function exportReport(r: Report) {
-  window.open(`${window.location.origin}/api/reports/${r.id}/export`, '_blank')
+async function restoreReport(r: Report) {
+  busy.value = true
+  try {
+    await apiRequest(`/reports/${r.id}/restore`, { method: 'POST' })
+    await load()
+  } catch (e) {
+    runError.value = e instanceof ApiException ? e.error.message : 'Restore failed'
+  } finally {
+    busy.value = false
+  }
+}
+async function exportReport(r: Report) {
   openMenuId.value = null
+  try {
+    await downloadFile(`/reports/${r.id}/export`, `${r.name}.json`)
+  } catch (e) {
+    runError.value = e instanceof ApiException ? e.error.message : 'Export failed'
+  }
 }
 function copyReportUrl(r: Report) {
   navigator.clipboard?.writeText(`${window.location.origin}/reports/${r.id}`)
@@ -191,7 +352,8 @@ async function onImportFile(ev: Event) {
   const fd = new FormData()
   fd.append('file', file)
   try {
-    await uploadFile('/reports/import', fd)
+    const res = await uploadFile<{ data: { import_notes?: string[] } }>('/reports/import', fd)
+    if (res.data.import_notes?.length) alert('Import complete:\n' + res.data.import_notes.join('\n'))
   } catch (e) {
     runError.value = e instanceof ApiException ? e.error.message : 'Import failed'
   } finally {
@@ -234,8 +396,15 @@ async function bulkDuplicate() {
     busy.value = false
   }
 }
-function bulkExport() {
-  for (const id of selectedIds.value) window.open(`${window.location.origin}/api/reports/${id}/export`, '_blank')
+async function bulkExport() {
+  for (const id of selectedIds.value) {
+    const r = reports.value.find(x => x.id === id)
+    try {
+      await downloadFile(`/reports/${id}/export`, `${r?.name ?? id}.json`)
+    } catch (e) {
+      runError.value = e instanceof ApiException ? e.error.message : 'Export failed'
+    }
+  }
 }
 
 // ── Computed ─────────────────────────────────────────────────────────────────
@@ -261,6 +430,8 @@ async function load() {
     const params = new URLSearchParams({ sort: sortBy.value })
     if (showArchived.value) params.set('include_archived', '1')
     reports.value = (await apiRequest<{ data: Report[] }>(`/reports?${params}`)).data
+    const trashedRes = (await apiRequest<{ data: Report[] }>(`/reports?${params}&with_trashed=1`)).data
+    deletedReports.value = trashedRes.filter(r => !!r.deleted_at)
     if (!roles.value.length)
       roles.value = (await apiRequest<{ data: { id: number; name: string }[] }>('/roles/options')).data
     if (auth.can('datasources.view') && !allDatasets.value.length) {
@@ -277,26 +448,33 @@ async function load() {
   }
 }
 
+const sidebar = inject<{ collapsed: { value: boolean }; setCollapsed: (v: boolean) => void } | null>('sidebar', null)
+
 async function openReport(r: Report) {
   preview.value = ''; rowCount.value = null; runError.value = ''; saveMsg.value = ''
   historyEntries.value = []; logEntries.value = []
+  sidebar?.setCollapsed(true) // only minimise the main nav once a specific report is actually opened
   try {
     selected.value = (await apiRequest<{ data: Report }>(`/reports/${r.id}`)).data
     const def = selected.value.definition ?? {}
     defText.value  = JSON.stringify(def, null, 2)
     prompt.value   = (def.prompt as string) ?? ''
+    promptHistory.value = (def.prompt_history as PromptHistoryEntry[]) ?? []
     editName.value   = selected.value.name
     editDesc.value   = selected.value.description ?? ''
     editType.value   = selected.value.type
     editStatus.value = selected.value.status
+    editTagsText.value = (selected.value.tags ?? []).join(', ')
     editDatasetId.value = selected.value.dataset?.id ?? null
-    editDataSourceId.value = allDatasets.value.find(d => d.id === selected.value?.dataset?.id)?.data_source_id ?? null
+    editDataSourceId.value = selected.value.dataset?.data_source_id ?? null
     editLayout.value = selected.value.layout ?? 'portrait'
     editPrintoutSize.value = selected.value.printout_size ?? 'a4'
     editPrintoutWidth.value = selected.value.printout_width ?? null
     editPrintoutHeight.value = selected.value.printout_height ?? null
     editOutputFormats.value = selected.value.output_formats ?? []
     editTemplateIds.value = (selected.value.templates ?? []).map(t => t.id)
+    editTemplateHeaderId.value = (def.template_header_id as number) ?? null
+    editTemplateFooterId.value = (def.template_footer_id as number) ?? null
     addTemplateId.value = null
     testConnResult.value = ''
     fixedParamsEnabled.value = (def.fixed_parameters_enabled as Record<string, boolean>) ?? {}
@@ -324,8 +502,11 @@ async function save() {
     let definition: Record<string, unknown>
     try { definition = JSON.parse(defText.value) } catch { throw new Error('Definition is not valid JSON') }
     definition.prompt = prompt.value
+    definition.prompt_history = promptHistory.value
     definition.fixed_parameters_enabled = fixedParamsEnabled.value
     definition.custom_parameters = customParams.value
+    definition.template_header_id = editTemplateHeaderId.value
+    definition.template_footer_id = editTemplateFooterId.value
     const permissions = Object.entries(perms.value)
       .filter(([, v]) => v.view || v.edit || v.run)
       .map(([role_id, v]) => ({ role_id: Number(role_id), ...v }))
@@ -334,6 +515,7 @@ async function save() {
       body: JSON.stringify({
         name: editName.value, description: editDesc.value,
         type: editType.value, status: editStatus.value,
+        tags: editTagsText.value.split(',').map(s => s.trim().replace(/^#/, '')).filter(Boolean),
         dataset_id: editDatasetId.value,
         layout: editLayout.value, printout_size: editPrintoutSize.value,
         printout_width: editPrintoutSize.value === 'custom' ? editPrintoutWidth.value : null,
@@ -469,18 +651,6 @@ async function create() {
   }
 }
 
-// ── Delete ───────────────────────────────────────────────────────────────────
-async function deleteReport() {
-  if (!selected.value || !confirm(`Delete "${selected.value.name}"?`)) return
-  try {
-    await apiRequest(`/reports/${selected.value.id}`, { method: 'DELETE' })
-    selected.value = null; preview.value = ''
-    await load()
-  } catch (e) {
-    runError.value = e instanceof ApiException ? e.error.message : 'Delete failed'
-  }
-}
-
 // ── Bottom tabs ───────────────────────────────────────────────────────────────
 async function loadHistory() {
   if (!selected.value) return
@@ -513,8 +683,66 @@ async function restoreHistory(entry: HistoryEntry) {
   editType.value   = (entry.snapshot?.type as string) ?? editType.value
   editStatus.value = (entry.snapshot?.status as string) ?? editStatus.value
   prompt.value = (def.prompt as string) ?? (entry.snapshot?.prompt as string) ?? prompt.value
+  // save() rebuilds definition.custom_parameters / fixed_parameters_enabled from
+  // these two refs (not from defText) — they MUST be resynced from the restored
+  // snapshot here, otherwise save() clobbers the restored version's parameters
+  // with whatever was left in memory from before the restore.
+  fixedParamsEnabled.value = (def.fixed_parameters_enabled as Record<string, boolean>) ?? {}
+  customParams.value = (def.custom_parameters as CustomParam[]) ?? []
+  promptHistory.value = (def.prompt_history as PromptHistoryEntry[]) ?? promptHistory.value
+  editTemplateHeaderId.value = (def.template_header_id as number) ?? null
+  editTemplateFooterId.value = (def.template_footer_id as number) ?? null
   await save()
   await previewReport()
+}
+
+// Clear history — either everything, or just the checked rows.
+const selectedHistoryIds = ref<Set<number>>(new Set())
+function toggleHistorySelect(id: number) {
+  const next = new Set(selectedHistoryIds.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  selectedHistoryIds.value = next
+}
+async function clearHistory(idsOnly = false) {
+  if (!selected.value) return
+  const ids = idsOnly ? Array.from(selectedHistoryIds.value) : undefined
+  if (idsOnly && !ids?.length) return
+  if (!confirm(idsOnly ? `Delete ${ids!.length} selected history entr${ids!.length === 1 ? 'y' : 'ies'}?` : 'Clear ALL history for this report? This cannot be undone.')) return
+  await apiRequest(`/reports/${selected.value.id}/history`, { method: 'DELETE', body: JSON.stringify({ ids }) })
+  selectedHistoryIds.value = new Set()
+  historyEntries.value = []
+  await loadHistory()
+}
+
+// "Team" icon — who has touched this report (from history + creator).
+const contributors = computed(() => {
+  const names = new Set<string>()
+  if (selected.value?.creator?.name) names.add(selected.value.creator.name)
+  for (const h of historyEntries.value) if (h.changed_by_name) names.add(h.changed_by_name)
+  return Array.from(names)
+})
+const showContributors = ref(false)
+function ensureHistoryLoaded() { if (!historyEntries.value.length) loadHistory() }
+function toggleContributors() {
+  showContributors.value = !showContributors.value
+  if (showContributors.value) ensureHistoryLoaded()
+}
+const showVersionMenu = ref(false)
+const versionPageIndex = ref(0)
+const versionPageSize = 10
+const versionPageCount = computed(() => Math.max(1, Math.ceil(historyEntries.value.length / versionPageSize)))
+const versionPage = computed(() => {
+  const start = versionPageIndex.value * versionPageSize
+  return historyEntries.value.slice(start, start + versionPageSize)
+})
+function toggleVersionMenu() {
+  showVersionMenu.value = !showVersionMenu.value
+  versionPageIndex.value = 0
+  if (showVersionMenu.value) ensureHistoryLoaded()
+}
+function onVersionPick(entry: HistoryEntry) {
+  showVersionMenu.value = false
+  restoreHistory(entry)
 }
 
 // ── Permissions ───────────────────────────────────────────────────────────────
@@ -536,21 +764,38 @@ function toggleAllGrant(field: 'view' | 'edit' | 'run') {
 // ── Report-level parameters ──────────────────────────────────────────────────
 function openAddParam() {
   editingParam.value = null
-  paramForm.value = { id: '', title: '', type: 'text', default_value: '', options: [], data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true }
+  paramForm.value = { id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true }
   paramOptionsText.value = ''
+  paramOptionsJsonError.value = ''
+  loadConstants()
   showParamModal.value = true
 }
 function openEditParam(p: CustomParam) {
   editingParam.value = p
-  paramForm.value = { ...p }
-  paramOptionsText.value = (p.options ?? []).join(', ')
+  paramForm.value = { source_type: 'datasource', ...p }
+  paramOptionsText.value = p.source_type === 'json' ? JSON.stringify(p.options ?? [], null, 0) : (p.options ?? []).join(', ')
+  paramOptionsJsonError.value = ''
+  loadConstants()
   showParamModal.value = true
 }
 function saveParam() {
   if (!paramForm.value.title) return
-  paramForm.value.options = ['dropdown', 'radio'].includes(paramForm.value.type)
-    ? paramOptionsText.value.split(',').map(s => s.trim()).filter(Boolean)
-    : []
+  const isList = ['dropdown', 'radio', 'checkbox'].includes(paramForm.value.type)
+  if (isList && paramForm.value.source_type === 'json') {
+    try {
+      const parsed = JSON.parse(paramOptionsText.value || '[]')
+      if (!Array.isArray(parsed)) throw new Error('not an array')
+      paramForm.value.options = parsed
+      paramOptionsJsonError.value = ''
+    } catch {
+      paramOptionsJsonError.value = 'Invalid JSON array — fix it before saving.'
+      return
+    }
+  } else if (isList) {
+    paramForm.value.options = []
+  } else {
+    paramForm.value.options = []
+  }
   if (editingParam.value) {
     customParams.value = customParams.value.map(p => p.id === editingParam.value!.id ? { ...paramForm.value } : p)
   } else {
@@ -567,6 +812,15 @@ const datasetColumnsForParam = computed(() => {
 })
 
 // ── Prompt: AI rewrites the report definition ────────────────────────────────
+const promptFile = ref<File | null>(null)
+const promptDropActive = ref(false)
+function onPromptFileChange(e: Event) {
+  promptFile.value = (e.target as HTMLInputElement).files?.[0] ?? null
+}
+function onPromptDrop(e: DragEvent) {
+  promptDropActive.value = false
+  promptFile.value = e.dataTransfer?.files?.[0] ?? null
+}
 async function generateFromPrompt() {
   if (!selected.value || !prompt.value) return
   promptBusy.value = true; runError.value = ''
@@ -574,12 +828,16 @@ async function generateFromPrompt() {
     // The backend now persists the AI-edited definition directly (and logs a
     // dedicated 'ai_generated' history entry with the prompt) — no separate
     // save() needed here.
-    const res = await apiRequest<{ data: { definition: Record<string, unknown>; report: Report } }>(`/reports/${selected.value.id}/generate-from-prompt`, {
-      method: 'POST', body: JSON.stringify({ prompt: prompt.value }),
-    })
+    const form = new FormData()
+    form.append('prompt', prompt.value)
+    if (promptFile.value) form.append('file', promptFile.value)
+    const res = await uploadFile<{ data: { definition: Record<string, unknown>; report: Report } }>(`/reports/${selected.value.id}/generate-from-prompt`, form)
     defText.value = JSON.stringify(res.data.definition, null, 2)
     selected.value = res.data.report
-    await previewReport()
+    promptHistory.value = (res.data.definition.prompt_history as PromptHistoryEntry[]) ?? promptHistory.value
+    prompt.value = '' // already recorded in prompt history below — don't leave it sitting in the box
+    promptFile.value = null
+    await run()
     historyEntries.value = []
     await loadHistory()
   } catch (e) {
@@ -590,14 +848,48 @@ async function generateFromPrompt() {
   }
 }
 
+function usePreviousPrompt(text: string) { prompt.value = text }
+// Save the prompt text to history without calling the AI — for jotting an idea down first.
+async function savePromptOnly() {
+  if (!prompt.value) return
+  promptHistory.value = [...promptHistory.value, { text: prompt.value, at: new Date().toISOString() }]
+  await save()
+}
+function copyPreviousPrompt(text: string) { navigator.clipboard?.writeText(text) }
+const showAllPrompts = ref(false)
+const selectedPromptIdx = ref<Set<number>>(new Set())
+const displayedPromptHistory = computed(() => {
+  const withIdx = promptHistory.value.map((p, idx) => ({ ...p, idx })).reverse()
+  return showAllPrompts.value ? withIdx : withIdx.slice(0, 3)
+})
+function togglePromptSelect(idx: number) {
+  const next = new Set(selectedPromptIdx.value)
+  next.has(idx) ? next.delete(idx) : next.add(idx)
+  selectedPromptIdx.value = next
+}
+async function deleteSelectedPrompts() {
+  if (!selectedPromptIdx.value.size) return
+  promptHistory.value = promptHistory.value.filter((_, idx) => !selectedPromptIdx.value.has(idx))
+  selectedPromptIdx.value = new Set()
+  await save()
+}
+
 // ── Clipboard ─────────────────────────────────────────────────────────────────
-function copyLink() { navigator.clipboard?.writeText(shareLink.value) }
+function copyLink() { navigator.clipboard?.writeText(shareLink.value); showShareMenu.value = false }
+async function duplicateFromEditor() {
+  if (!selected.value) return
+  showShareMenu.value = false
+  await duplicateReport(selected.value)
+  selected.value = null // duplicate lands in the card list, not this editor
+}
+const showShareMenu = ref(false)
 
 watch([sortBy, showArchived], load)
 onMounted(load)
 function closeMenuOnOutsideClick() { openMenuId.value = null }
 onMounted(() => document.addEventListener('click', closeMenuOnOutsideClick))
 onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick))
+onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); window.removeEventListener('mouseup', onResizeEnd) })
 </script>
 
 <template>
@@ -608,24 +900,54 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
       <!-- ── Top bar ─────────────────────────────────────────────────────── -->
       <div class="shrink-0 flex items-center justify-between px-6 py-3 border-b border-slate-100 bg-white">
         <div>
-          <h1 class="text-base font-semibold text-slate-800 leading-tight">Reports</h1>
-          <p class="text-xs text-slate-400">Build, preview, and share data-driven reports.</p>
+          <h1 class="text-base font-semibold text-slate-800 leading-tight">{{ selected ? selected.name : 'Reports' }}</h1>
+          <p class="text-xs text-slate-400">{{ selected ? (selected.description || 'No description') : 'Build, preview, and share data-driven reports.' }}</p>
         </div>
         <div class="flex items-center gap-2">
-          <!-- Version badge -->
-          <span v-if="selected" class="text-xs border border-slate-200 rounded px-2 py-0.5 text-slate-500">
-            v {{ selected.updated_at ? new Date(selected.updated_at).toLocaleDateString() : '—' }}
-          </span>
-          <!-- Team icon placeholder -->
-          <button class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100" title="Team">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 00-5-5M9 20H4v-2a4 4 0 015-5m6-4a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-          </button>
-          <!-- Copy link -->
-          <button @click="copyLink" :disabled="!selected" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-30" title="Copy link">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-          </button>
+          <!-- Version badge + paginated history dropdown -->
+          <div v-if="selected" class="relative">
+            <button @click="toggleVersionMenu" class="text-xs border border-slate-200 rounded px-2 py-0.5 text-slate-500 bg-white hover:bg-slate-50">
+              v {{ selected.version_label ?? '—' }}
+            </button>
+            <div v-if="showVersionMenu" class="absolute right-0 mt-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg z-20 py-1" @click.self="showVersionMenu = false">
+              <div v-if="!historyEntries.length" class="text-xs text-slate-400 px-3 py-2">No history yet.</div>
+              <button v-for="h in versionPage" :key="h.id" @click="onVersionPick(h)"
+                class="w-full text-left text-xs text-slate-600 hover:bg-slate-50 px-3 py-1.5">
+                v{{ h.version_label }} — {{ h.changed_by_name }} ({{ new Date(h.created_at).toLocaleString() }})
+              </button>
+              <div v-if="historyEntries.length > versionPageSize" class="flex items-center justify-between px-3 pt-1.5 mt-1 border-t border-slate-100">
+                <button @click="versionPageIndex--" :disabled="versionPageIndex === 0" class="text-xs text-airr-600 disabled:text-slate-300 disabled:cursor-not-allowed">‹ Prev</button>
+                <span class="text-[11px] text-slate-400">{{ versionPageIndex + 1 }} / {{ versionPageCount }}</span>
+                <button @click="versionPageIndex++" :disabled="versionPageIndex >= versionPageCount - 1" class="text-xs text-airr-600 disabled:text-slate-300 disabled:cursor-not-allowed">Next ›</button>
+              </div>
+            </div>
+          </div>
+          <!-- Team icon — who has worked on this report (only relevant once one's open) -->
+          <div v-if="selected" class="relative">
+            <button @click="toggleContributors" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100" title="Contributors">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 00-5-5M9 20H4v-2a4 4 0 015-5m6-4a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+            </button>
+            <div v-if="showContributors" class="absolute right-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-20 p-2" @click.self="showContributors = false">
+              <p class="text-[10px] font-semibold text-slate-400 uppercase px-2 pb-1">Contributors</p>
+              <div v-if="!contributors.length" class="text-xs text-slate-400 px-2 py-1">No history yet.</div>
+              <div v-for="n in contributors" :key="n" class="text-sm text-slate-600 px-2 py-1">{{ n }}</div>
+            </div>
+          </div>
+          <!-- Copy / duplicate menu (only relevant once a report is open) -->
+          <div v-if="selected" class="relative">
+            <button @click="showShareMenu = !showShareMenu" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100" title="Copy link or duplicate report">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            </button>
+            <div v-if="showShareMenu" class="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-20 py-1" @click.self="showShareMenu = false">
+              <button @click="copyLink" class="w-full text-left text-sm text-slate-600 hover:bg-slate-50 px-3 py-1.5">Copy report link</button>
+              <button @click="duplicateFromEditor" class="w-full text-left text-sm text-slate-600 hover:bg-slate-50 px-3 py-1.5">Duplicate report</button>
+            </div>
+          </div>
           <button v-if="selected" @click="selected = null" class="text-sm text-slate-500 hover:text-slate-700 px-2 py-1.5">← Back to reports</button>
           <template v-if="canCreate && !selected">
+            <button v-if="sidebar" @click="sidebar.setCollapsed(!sidebar.collapsed.value)" class="text-sm text-slate-500 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5" title="Collapse/expand the main menu">
+              {{ sidebar.collapsed.value ? '»' : '«' }}
+            </button>
             <button @click="triggerImport" class="text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5">Import</button>
             <input ref="importInput" type="file" accept=".json,application/json" class="hidden" @change="onImportFile" />
           </template>
@@ -636,6 +958,15 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
 
       <!-- ── Card grid landing (no report selected) ───────────────────────── -->
       <div v-if="!selected" class="flex-1 overflow-y-auto p-6 bg-white">
+        <!-- Hashtag filter -->
+        <div v-if="allReportTags.length" class="flex flex-wrap items-center gap-1.5 mb-3">
+          <span class="text-xs text-slate-400">Filter by hashtag:</span>
+          <button v-for="tag in allReportTags" :key="tag" @click="activeReportTag = activeReportTag === tag ? null : tag"
+            class="text-xs rounded-full px-2.5 py-1"
+            :class="activeReportTag === tag ? 'bg-airr-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'">
+            #{{ tag }}
+          </button>
+        </div>
         <!-- Controls: select-all, sort, archived toggle, bulk actions -->
         <div class="flex items-center justify-between gap-3 mb-4 flex-wrap">
           <div class="flex items-center gap-3">
@@ -654,10 +985,11 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
               <option value="-name">Name Z–A</option>
               <option value="status">Status</option>
             </select>
+            <input v-model="reportSearchText" placeholder="Search reports…" class="text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-airr-300 w-40" />
           </div>
           <div v-if="selectedIds.size" class="flex items-center gap-2">
             <span class="text-xs text-slate-400">{{ selectedIds.size }} selected</span>
-            <button @click="bulkDuplicate" :disabled="busy" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Copy</button>
+            <button @click="bulkDuplicate" :disabled="busy" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Duplicate</button>
             <button @click="bulkExport" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Export</button>
             <button @click="bulkArchive" :disabled="busy" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Archive</button>
             <button @click="bulkDelete" :disabled="busy" class="text-xs font-medium text-rose-600 border border-rose-200 hover:bg-rose-50 rounded-lg px-2.5 py-1.5">Delete</button>
@@ -666,8 +998,9 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
 
         <div v-if="loading" class="text-slate-400 text-sm">Loading…</div>
         <div v-else-if="!reports.length" class="text-slate-400 text-sm">No reports yet.</div>
+        <div v-else-if="!filteredReports.length" class="text-slate-400 text-sm">No reports match.</div>
         <div v-else class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <div v-for="r in reports" :key="r.id" class="relative bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-2 hover:border-slate-200 transition"
+          <div v-for="r in filteredReports" :key="r.id" class="relative bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-2 hover:border-slate-200 transition"
             :class="r.archived_at ? 'opacity-50' : ''"
             :style="{ borderLeft: `4px solid ${STATUS_ACCENT[r.status] ?? '#94A3B8'}` }">
             <div class="flex items-start justify-between gap-2">
@@ -689,6 +1022,7 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
                     class="absolute right-0 top-full mt-1 w-40 bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-1 text-xs">
                     <button @click.stop="duplicateReport(r)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Duplicate</button>
                     <button @click.stop="exportReport(r)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Export</button>
+                    <button @click.stop="openCardLog(r)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Log</button>
                     <button @click.stop="copyReportUrl(r)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Copy URL</button>
                     <button @click.stop="toggleDebug(r.id); openMenuId = null" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">
                       {{ debugIds.has(r.id) ? '✓ Debug mode' : 'Debug mode' }}
@@ -702,8 +1036,23 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
               </div>
             </div>
             <p v-if="r.description" class="text-xs text-slate-500 line-clamp-2 cursor-pointer" @click="openReport(r)">{{ r.description }}</p>
+            <div v-if="r.tags?.length" class="flex flex-wrap gap-1">
+              <span v-for="tag in r.tags" :key="tag" class="text-[10px] bg-airr-50 text-airr-600 rounded-full px-2 py-0.5">#{{ tag }}</span>
+            </div>
             <div class="text-xs text-slate-400 cursor-pointer" @click="openReport(r)">{{ r.project?.name ?? 'global' }}</div>
             <div class="text-xs text-slate-400 mt-auto cursor-pointer" @click="openReport(r)">by {{ r.creator?.name ?? '—' }}</div>
+          </div>
+        </div>
+
+        <!-- Deleted reports -->
+        <div v-if="deletedReports.length" class="mt-6">
+          <p class="text-xs font-medium text-slate-400 mb-2">Deleted reports</p>
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div v-for="r in deletedReports" :key="r.id" class="bg-slate-50 rounded-xl border border-dashed border-slate-200 p-4 flex flex-col gap-2 opacity-60">
+              <div class="font-semibold text-slate-600 truncate line-through">{{ r.name }}</div>
+              <p v-if="r.description" class="text-xs text-slate-400 line-clamp-2">{{ r.description }}</p>
+              <button @click="restoreReport(r)" :disabled="busy" class="text-xs text-emerald-600 hover:underline font-medium self-start">Undo delete</button>
+            </div>
           </div>
         </div>
       </div>
@@ -712,29 +1061,71 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
       <div v-else class="flex-1 flex overflow-hidden min-h-0">
 
         <!-- LEFT PANEL -->
-        <aside class="w-72 shrink-0 flex flex-col border-r border-slate-100 overflow-y-auto bg-white">
-          <template v-if="selected">
+        <aside :style="{ width: leftPanelCollapsed ? '36px' : leftWidth + 'px' }" class="shrink-0 flex flex-col border-r border-slate-100 overflow-y-auto bg-white">
+          <button @click="leftPanelCollapsed = !leftPanelCollapsed" class="shrink-0 text-slate-400 hover:text-slate-600 text-xs px-2 py-1.5 text-left border-b border-slate-50">
+            {{ leftPanelCollapsed ? '»' : '« Collapse' }}
+          </button>
+          <template v-if="selected && !leftPanelCollapsed">
             <!-- Prompt -->
-            <div class="border-b border-slate-50">
-              <button @click="toggleSection('prompt')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50">
-                <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Prompt</span>
+            <div class="border-b border-slate-50" :style="{ order: leftOrder.indexOf('prompt') }" @dragover.prevent @drop="onDrop('prompt', 'left')">
+              <button draggable="true" @dragstart="onDragStart('prompt')" @click="toggleSection('prompt')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50 cursor-move">
+                <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">⠿ Prompt</span>
                 <span class="text-slate-400 text-xs">{{ openSections.prompt ? '▾' : '▸' }}</span>
               </button>
               <div v-show="openSections.prompt" class="px-3 pb-3">
                 <p class="text-[10px] text-slate-400 mb-1.5">Tell the AI how this report should look — e.g. "switch to a form layout", "remove the email column", "add a running total".</p>
-                <textarea v-model="prompt" rows="6" placeholder="Describe what this report should show…"
-                  class="w-full text-xs rounded-lg border border-slate-200 px-2.5 py-2 outline-none focus:ring-2 focus:ring-airr-300 resize-none"></textarea>
-                <button @click="generateFromPrompt" :disabled="!prompt || promptBusy || selected.locked"
-                  class="mt-1.5 w-full text-xs font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5 disabled:opacity-40">
-                  {{ promptBusy ? 'Generating…' : 'Generate' }}
-                </button>
+                <textarea v-model="prompt" rows="6" placeholder="Describe what this report should show… (or drop an image/document here)"
+                  @dragover.prevent="promptDropActive = true" @dragleave.prevent="promptDropActive = false" @drop.prevent="onPromptDrop"
+                  class="w-full text-xs rounded-lg border px-2.5 py-2 outline-none focus:ring-2 focus:ring-airr-300 resize-none transition"
+                  :class="promptDropActive ? 'border-airr-400 bg-airr-50' : 'border-slate-200'"></textarea>
+                <div class="flex items-center gap-1.5 mt-1.5">
+                  <label class="text-[11px] text-slate-500 border border-slate-200 hover:bg-slate-50 rounded-lg px-2 py-1 cursor-pointer">
+                    📎 Attach <span class="text-slate-400">/ drop file</span>
+                    <input type="file" accept="image/png,image/jpeg,image/webp,application/pdf,.txt,.md,.csv" class="hidden" @change="onPromptFileChange" />
+                  </label>
+                  <span v-if="promptFile" class="text-[11px] text-slate-500 truncate max-w-[7rem]" :title="promptFile.name">{{ promptFile.name }}</span>
+                  <button v-if="promptFile" @click="promptFile = null" class="text-[11px] text-rose-500">✕</button>
+                </div>
+                <p v-if="promptFile" class="text-[10px] text-slate-400 mt-1">The AI will read this image/document together with your instruction.</p>
+                <div class="flex gap-1.5 mt-1.5">
+                  <button @click="prompt = ''" :disabled="!prompt" class="text-[11px] text-slate-500 border border-slate-200 hover:bg-slate-50 rounded-lg px-2 py-1 disabled:opacity-40">Clear</button>
+                  <button @click="copyPreviousPrompt(prompt)" :disabled="!prompt" class="text-[11px] text-slate-500 border border-slate-200 hover:bg-slate-50 rounded-lg px-2 py-1 disabled:opacity-40">Copy</button>
+                  <button @click="savePromptOnly" :disabled="!prompt || selected.locked" class="text-[11px] text-slate-500 border border-slate-200 hover:bg-slate-50 rounded-lg px-2 py-1 disabled:opacity-40">Save</button>
+                  <button @click="generateFromPrompt" :disabled="!prompt || promptBusy || selected.locked"
+                    class="flex-1 text-xs font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1 disabled:opacity-40">
+                    {{ promptBusy ? 'Generating…' : 'Generate' }}
+                  </button>
+                </div>
+                <div v-if="promptHistory.length" class="mt-2 space-y-1">
+                  <div class="flex items-center justify-between">
+                    <p class="text-[10px] font-semibold text-slate-400 uppercase">Previous prompts</p>
+                    <button v-if="selectedPromptIdx.size" @click="deleteSelectedPrompts" class="text-[10px] text-rose-600 hover:underline">Delete selected</button>
+                  </div>
+                  <div class="max-h-56 overflow-y-auto space-y-1">
+                    <div v-for="p in displayedPromptHistory" :key="p.idx"
+                      class="flex items-start justify-between gap-1.5 text-[11px] border border-slate-100 rounded-lg px-2 py-1.5">
+                      <input type="checkbox" :checked="selectedPromptIdx.has(p.idx)" @change="togglePromptSelect(p.idx)" class="mt-0.5 rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
+                      <div class="min-w-0 flex-1">
+                        <div class="text-slate-600 truncate" :title="p.text">{{ p.text }}</div>
+                        <div class="text-slate-400">{{ new Date(p.at).toLocaleString() }}</div>
+                      </div>
+                      <div class="flex flex-col items-end gap-0.5 shrink-0">
+                        <button @click="copyPreviousPrompt(p.text)" class="text-airr-600 hover:underline">Copy</button>
+                        <button @click="usePreviousPrompt(p.text)" class="text-airr-600 hover:underline">Use</button>
+                      </div>
+                    </div>
+                  </div>
+                  <button v-if="promptHistory.length > 3" @click="showAllPrompts = !showAllPrompts" class="text-[10px] text-slate-400 hover:underline">
+                    {{ showAllPrompts ? 'Show less' : `Show all (${promptHistory.length})` }}
+                  </button>
+                </div>
               </div>
             </div>
 
             <!-- Permission (starts closed) -->
-            <div class="border-b border-slate-50">
-              <button @click="toggleSection('permission')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50">
-                <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Permission</span>
+            <div class="border-b border-slate-50" :style="{ order: leftOrder.indexOf('permission') }" @dragover.prevent @drop="onDrop('permission', 'left')">
+              <button draggable="true" @dragstart="onDragStart('permission')" @click="toggleSection('permission')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50 cursor-move">
+                <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">⠿ Permission</span>
                 <span class="text-slate-400 text-xs">{{ openSections.permission ? '▾' : '▸' }}</span>
               </button>
               <div v-show="openSections.permission" class="px-3 pb-3">
@@ -767,9 +1158,9 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
             </div>
 
             <!-- Parameters -->
-            <div>
-              <button @click="toggleSection('parameters')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50">
-                <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Parameters</span>
+            <div :style="{ order: leftOrder.indexOf('parameters') }" @dragover.prevent @drop="onDrop('parameters', 'left')">
+              <button draggable="true" @dragstart="onDragStart('parameters')" @click="toggleSection('parameters')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50 cursor-move">
+                <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">⠿ Parameters</span>
                 <span class="text-slate-400 text-xs">{{ openSections.parameters ? '▾' : '▸' }}</span>
               </button>
               <div v-show="openSections.parameters" class="px-3 pb-3 space-y-3">
@@ -798,6 +1189,32 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
                         <label class="block text-[10px] text-slate-500 mb-0.5">Layout size</label>
                         <select v-model="editPrintoutSize" class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300 uppercase">
                           <option v-for="p in PRINTOUT_SIZES" :key="p" :value="p">{{ p }}</option>
+                        </select>
+                      </div>
+                    </div>
+                    <!-- Built-in: Template header/footer — which attached Template's
+                         header/footer content wraps the report output. -->
+                    <div class="flex items-center gap-2">
+                      <input type="checkbox" :checked="fixedParamsEnabled['template_header'] ?? true"
+                        @change="fixedParamsEnabled = { ...fixedParamsEnabled, template_header: !(fixedParamsEnabled['template_header'] ?? true) }"
+                        class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
+                      <div class="min-w-0 flex-1">
+                        <label class="block text-[10px] text-slate-500 mb-0.5">Template header</label>
+                        <select v-model="editTemplateHeaderId" class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300">
+                          <option :value="null">— none —</option>
+                          <option v-for="t in allTemplates" :key="t.id" :value="t.id">{{ t.name }}</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <input type="checkbox" :checked="fixedParamsEnabled['template_footer'] ?? true"
+                        @change="fixedParamsEnabled = { ...fixedParamsEnabled, template_footer: !(fixedParamsEnabled['template_footer'] ?? true) }"
+                        class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
+                      <div class="min-w-0 flex-1">
+                        <label class="block text-[10px] text-slate-500 mb-0.5">Template footer</label>
+                        <select v-model="editTemplateFooterId" class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300">
+                          <option :value="null">— none —</option>
+                          <option v-for="t in allTemplates" :key="t.id" :value="t.id">{{ t.name }}</option>
                         </select>
                       </div>
                     </div>
@@ -841,6 +1258,7 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
             </div>
           </template>
         </aside>
+        <div v-if="!leftPanelCollapsed" @mousedown="startResize('left', $event)" class="w-1 shrink-0 cursor-col-resize hover:bg-airr-300 active:bg-airr-400"></div>
 
         <!-- CENTER PANEL (Preview) -->
         <main class="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50">
@@ -901,11 +1319,16 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
         </main>
 
         <!-- RIGHT PANEL -->
-        <aside v-if="selected" class="w-72 shrink-0 flex flex-col border-l border-slate-100 overflow-y-auto bg-white">
+        <div v-if="selected && !rightPanelCollapsed" @mousedown="startResize('right', $event)" class="w-1 shrink-0 cursor-col-resize hover:bg-airr-300 active:bg-airr-400"></div>
+        <aside v-if="selected" :style="{ width: rightPanelCollapsed ? '36px' : rightWidth + 'px' }" class="shrink-0 flex flex-col border-l border-slate-100 overflow-y-auto bg-white">
+          <button @click="rightPanelCollapsed = !rightPanelCollapsed" class="shrink-0 text-slate-400 hover:text-slate-600 text-xs px-2 py-1.5 text-left border-b border-slate-50">
+            {{ rightPanelCollapsed ? '«' : 'Collapse »' }}
+          </button>
+          <template v-if="!rightPanelCollapsed">
           <!-- Setting -->
-          <div class="border-b border-slate-50">
-            <button @click="toggleSection('setting')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50">
-              <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Setting</span>
+          <div class="border-b border-slate-50" :style="{ order: rightOrder.indexOf('setting') }" @dragover.prevent @drop="onDrop('setting', 'right')">
+            <button draggable="true" @dragstart="onDragStart('setting')" @click="toggleSection('setting')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50 cursor-move">
+              <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">⠿ Setting</span>
               <span class="text-slate-400 text-xs">{{ openSections.setting ? '▾' : '▸' }}</span>
             </button>
             <div v-show="openSections.setting" class="px-3 pb-3 space-y-2">
@@ -925,6 +1348,10 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
                   <option value="draft">Draft</option>
                   <option value="published">Published</option>
                 </select>
+              </div>
+              <div>
+                <label class="block text-[11px] text-slate-500 mb-0.5">Hashtags <span class="text-slate-400 font-normal">(comma-separated)</span></label>
+                <input v-model="editTagsText" :disabled="selected.locked" placeholder="kutipan, pbt" class="w-full text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-airr-300 disabled:bg-slate-50" />
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-[11px] text-slate-500">Version <span class="font-mono text-slate-600">v{{ selected.version ?? 0 }}</span></span>
@@ -963,16 +1390,13 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
                   </label>
                 </div>
               </div>
-              <div v-if="canEdit">
-                <button @click="deleteReport" class="text-xs text-rose-500 hover:underline">Delete report</button>
-              </div>
             </div>
           </div>
 
           <!-- Template -->
-          <div class="border-b border-slate-50">
-            <button @click="toggleSection('template')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50">
-              <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Template</span>
+          <div class="border-b border-slate-50" :style="{ order: rightOrder.indexOf('template') }" @dragover.prevent @drop="onDrop('template', 'right')">
+            <button draggable="true" @dragstart="onDragStart('template')" @click="toggleSection('template')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50 cursor-move">
+              <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">⠿ Template</span>
               <span class="text-slate-400 text-xs">{{ openSections.template ? '▾' : '▸' }}</span>
             </button>
             <div v-show="openSections.template" class="px-3 pb-3">
@@ -995,9 +1419,9 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
           </div>
 
           <!-- Datasource -->
-          <div class="border-b border-slate-50">
-            <button @click="toggleSection('datasource')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50">
-              <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Datasource</span>
+          <div class="border-b border-slate-50" :style="{ order: rightOrder.indexOf('datasource') }" @dragover.prevent @drop="onDrop('datasource', 'right')">
+            <button draggable="true" @dragstart="onDragStart('datasource')" @click="toggleSection('datasource')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50 cursor-move">
+              <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">⠿ Datasource</span>
               <span class="text-slate-400 text-xs">{{ openSections.datasource ? '▾' : '▸' }}</span>
             </button>
             <div v-show="openSections.datasource" class="px-3 pb-3 space-y-2">
@@ -1033,9 +1457,9 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
           </div>
 
           <!-- Property -->
-          <div>
-            <button @click="toggleSection('property')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50">
-              <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Property</span>
+          <div :style="{ order: rightOrder.indexOf('property') }" @dragover.prevent @drop="onDrop('property', 'right')">
+            <button draggable="true" @dragstart="onDragStart('property')" @click="toggleSection('property')" class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50 cursor-move">
+              <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">⠿ Property</span>
               <span class="text-slate-400 text-xs">{{ openSections.property ? '▾' : '▸' }}</span>
             </button>
             <div v-show="openSections.property" class="px-3 pb-3 space-y-2">
@@ -1054,13 +1478,16 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
               </div>
             </div>
           </div>
+          </template>
         </aside>
       </div>
 
       <!-- ── Bottom panel (tabs) — only relevant once a report is open ───── -->
-      <div v-if="selected" class="shrink-0 border-t border-slate-100 bg-white" :class="bottomOpen ? 'h-44' : 'h-9'">
+      <div v-if="selected" class="shrink-0 border-t border-slate-100 bg-white flex flex-col"
+        :style="{ height: !bottomOpen ? '36px' : (bottomMaximized ? '70vh' : bottomHeight + 'px') }">
+        <div v-if="bottomOpen" @mousedown="startResize('bottom', $event)" class="h-1 -mt-1 shrink-0 cursor-row-resize hover:bg-airr-300 active:bg-airr-400"></div>
         <!-- Tab bar -->
-        <div class="flex items-center gap-0 border-b border-slate-100 px-4">
+        <div class="flex items-center gap-0 border-b border-slate-100 px-4 shrink-0">
           <button v-for="tab in (['history', 'error', 'api'] as const)" :key="tab"
             @click="switchBottomTab(tab)"
             class="text-xs font-medium px-3 py-2 border-b-2 capitalize transition"
@@ -1068,33 +1495,45 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
             {{ tab === 'error' ? 'Error' : tab === 'api' ? 'API' : 'History' }}
           </button>
           <div class="flex-1"></div>
-          <button @click="bottomOpen = !bottomOpen" class="text-xs text-slate-400 hover:text-slate-600 px-2 py-1.5">
+          <template v-if="bottomTab === 'history' && historyEntries.length">
+            <span class="text-[11px] text-slate-400 mr-3">{{ selectedHistoryIds.size }} selected</span>
+            <button v-if="selectedHistoryIds.size" @click="clearHistory(true)" class="text-[11px] text-rose-600 hover:underline mr-3">Delete selected</button>
+            <button @click="clearHistory(false)" class="text-[11px] text-rose-600 hover:underline mr-3">Clear all</button>
+          </template>
+          <button v-if="bottomOpen" @click="bottomMaximized = !bottomMaximized" class="text-xs text-slate-400 hover:text-slate-600 px-2 py-1.5" :title="bottomMaximized ? 'Restore' : 'Maximize'">
+            {{ bottomMaximized ? '⤡' : '⤢' }}
+          </button>
+          <button @click="bottomOpen = !bottomOpen; bottomMaximized = false" class="text-xs text-slate-400 hover:text-slate-600 px-2 py-1.5">
             {{ bottomOpen ? '▾' : '▴' }}
           </button>
         </div>
 
         <!-- Tab content -->
-        <div v-if="bottomOpen" class="overflow-y-auto" style="height: calc(100% - 2rem)">
+        <div v-if="bottomOpen" class="overflow-y-auto flex-1 min-h-0">
           <!-- History tab -->
           <div v-if="bottomTab === 'history'" class="p-3">
             <div v-if="!selected" class="text-xs text-slate-400">Select a report first.</div>
             <div v-else-if="bottomBusy" class="text-xs text-slate-400">Loading…</div>
             <div v-else-if="!historyEntries.length" class="text-xs text-slate-400">No history yet — save the report to create the first entry.</div>
-            <div v-else class="space-y-1.5">
-              <div v-for="h in historyEntries" :key="h.id"
-                class="flex items-center justify-between gap-3 text-xs border border-slate-100 rounded-lg px-3 py-2">
-                <div class="flex items-center gap-2 min-w-0">
-                  <span class="text-slate-400 shrink-0">{{ h.created_at }}</span>
-                  <span class="font-medium text-slate-700">{{ HISTORY_ACTION_LABELS[h.action] ?? h.action }}</span>
-                  <span class="text-slate-400 truncate">by {{ h.changed_by_name }}</span>
-                  <span v-if="h.action === 'ai_generated' && h.snapshot?.prompt" class="text-airr-600 truncate">— "{{ h.snapshot.prompt }}"</span>
-                  <span v-else-if="h.snapshot?.name" class="text-slate-500 truncate">— {{ h.snapshot.name }}</span>
-                </div>
-                <div class="flex items-center gap-1.5 shrink-0">
-                  <button @click="restoreHistory(h)" class="text-[11px] text-airr-600 hover:underline">Restore</button>
+            <template v-else>
+              <div class="space-y-1.5">
+                <div v-for="h in historyEntries" :key="h.id"
+                  class="flex items-center justify-between gap-3 text-xs border border-slate-100 rounded-lg px-3 py-2">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <input type="checkbox" :checked="selectedHistoryIds.has(h.id)" @change="toggleHistorySelect(h.id)" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
+                    <span class="text-slate-400 shrink-0">{{ new Date(h.created_at).toLocaleString() }}</span>
+                    <span class="text-slate-400 shrink-0 font-mono">v{{ h.version_label }}</span>
+                    <span class="font-medium text-slate-700">{{ HISTORY_ACTION_LABELS[h.action] ?? h.action }}</span>
+                    <span class="text-slate-400 truncate">by {{ h.changed_by_name }}</span>
+                    <span v-if="h.action === 'ai_generated' && h.snapshot?.prompt" class="text-airr-600 truncate">— "{{ h.snapshot.prompt }}"</span>
+                    <span v-else-if="h.snapshot?.name" class="text-slate-500 truncate">— {{ h.snapshot.name }}</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 shrink-0">
+                    <button @click="restoreHistory(h)" class="text-[11px] text-airr-600 hover:underline">Restore</button>
+                  </div>
                 </div>
               </div>
-            </div>
+            </template>
           </div>
 
           <!-- Error tab -->
@@ -1105,7 +1544,7 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
             <div v-else class="space-y-1.5">
               <div v-for="l in logEntries.filter(l => l.event?.includes('error') || l.event?.includes('fail'))" :key="l.id"
                 class="text-xs border border-rose-100 rounded-lg px-3 py-2 bg-rose-50">
-                <span class="text-slate-400 mr-2">{{ l.created_at }}</span>
+                <span class="text-slate-400 mr-2">{{ new Date(l.created_at).toLocaleString() }}</span>
                 <span class="font-medium text-rose-700">{{ l.event }}</span>
                 <span class="text-slate-500 ml-2">by {{ l.user_name }}</span>
               </div>
@@ -1198,47 +1637,89 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
           <select v-model="paramForm.type" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none">
             <option value="text">Text (default value)</option>
             <option value="dropdown">Dropdown</option>
-            <option value="checkbox">Checkbox</option>
+            <option value="checkbox">Checkbox (multi-select)</option>
             <option value="radio">Radio</option>
+            <option value="date">Date</option>
+            <option value="datetime">Date &amp; Time</option>
+            <option value="time">Time</option>
+            <option value="amount">Amount</option>
           </select>
         </div>
+
+        <!-- Default value per type -->
         <div v-if="paramForm.type === 'text'">
-          <label class="block text-sm font-medium text-slate-600 mb-1">Default value</label>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-sm font-medium text-slate-600">Default value</label>
+            <select v-if="constants.length" @change="insertConstant(($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"
+              class="text-[11px] border border-slate-200 rounded px-1.5 py-0.5 text-slate-500">
+              <option value="">Insert constant…</option>
+              <option v-for="c in constants" :key="c.id" :value="constantToken(c)">{{ c.label || c.key }}</option>
+            </select>
+          </div>
           <input v-model="paramForm.default_value as string" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
         </div>
-        <div v-else-if="paramForm.type === 'checkbox'">
-          <label class="flex items-center gap-2 text-sm text-slate-600">
-            <input type="checkbox" v-model="paramForm.default_value as unknown as boolean" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" />
-            Default checked
-          </label>
+        <div v-else-if="['date', 'datetime', 'time'].includes(paramForm.type)">
+          <label class="block text-sm font-medium text-slate-600 mb-1">Default value</label>
+          <input v-model="paramForm.default_value as string"
+            :type="paramForm.type === 'datetime' ? 'datetime-local' : paramForm.type"
+            class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
         </div>
-        <div v-else>
-          <label class="block text-sm font-medium text-slate-600 mb-1">Options <span class="text-slate-400 font-normal">· comma-separated</span></label>
-          <input v-model="paramOptionsText" placeholder="Option A, Option B, Option C" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
-        </div>
-        <div class="grid grid-cols-2 gap-2">
+        <div v-else-if="paramForm.type === 'amount'" class="grid grid-cols-3 gap-2">
           <div>
-            <label class="block text-sm font-medium text-slate-600 mb-1">Data source <span class="text-slate-400 font-normal">· optional</span></label>
-            <select v-model="paramForm.data_source_id" @change="paramForm.dataset_id = null; paramForm.data_column = null" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none">
-              <option :value="null">— none —</option>
-              <option v-for="s in dataSources" :key="s.id" :value="s.id">{{ s.name }}</option>
-            </select>
+            <label class="block text-sm font-medium text-slate-600 mb-1">Default</label>
+            <input v-model="paramForm.default_value as string" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
           </div>
           <div>
-            <label class="block text-sm font-medium text-slate-600 mb-1">Dataset</label>
-            <select v-model="paramForm.dataset_id" @change="paramForm.data_column = null" :disabled="!paramForm.data_source_id" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none disabled:bg-slate-50">
-              <option :value="null">— none —</option>
-              <option v-for="d in datasetsForParam" :key="d.id" :value="d.id">{{ d.name }}</option>
-            </select>
+            <label class="block text-sm font-medium text-slate-600 mb-1">Min</label>
+            <input v-model.number="paramForm.min" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-600 mb-1">Max</label>
+            <input v-model.number="paramForm.max" type="number" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
           </div>
         </div>
-        <div v-if="paramForm.dataset_id">
-          <label class="block text-sm font-medium text-slate-600 mb-1">Column</label>
-          <select v-model="paramForm.data_column" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none">
-            <option :value="null">— none —</option>
-            <option v-for="c in datasetColumnsForParam" :key="c" :value="c">{{ c }}</option>
-          </select>
-        </div>
+
+        <!-- Options source for dropdown/radio/checkbox: JSON list or a datasource column -->
+        <template v-if="['dropdown', 'radio', 'checkbox'].includes(paramForm.type)">
+          <div class="flex gap-4 text-sm text-slate-600">
+            <label class="flex items-center gap-1.5">
+              <input type="radio" value="json" v-model="paramForm.source_type" class="text-airr-500 focus:ring-airr-300" /> JSON list
+            </label>
+            <label class="flex items-center gap-1.5">
+              <input type="radio" value="datasource" v-model="paramForm.source_type" class="text-airr-500 focus:ring-airr-300" /> Data source
+            </label>
+          </div>
+          <div v-if="paramForm.source_type === 'json'">
+            <label class="block text-sm font-medium text-slate-600 mb-1">Options <span class="text-slate-400 font-normal">· JSON array</span></label>
+            <textarea v-model="paramOptionsText" rows="3" placeholder='["Option A", "Option B"] or [{"value":"a","label":"Option A"}]'
+              class="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs focus:ring-2 focus:ring-airr-300 outline-none"></textarea>
+            <p v-if="paramOptionsJsonError" class="text-xs text-rose-600 mt-1">{{ paramOptionsJsonError }}</p>
+          </div>
+          <div v-else class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-sm font-medium text-slate-600 mb-1">Data source</label>
+              <select v-model="paramForm.data_source_id" @change="paramForm.dataset_id = null; paramForm.data_column = null" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none">
+                <option :value="null">— none —</option>
+                <option v-for="s in dataSources" :key="s.id" :value="s.id">{{ s.name }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-600 mb-1">Dataset</label>
+              <select v-model="paramForm.dataset_id" @change="paramForm.data_column = null" :disabled="!paramForm.data_source_id" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none disabled:bg-slate-50">
+                <option :value="null">— none —</option>
+                <option v-for="d in datasetsForParam" :key="d.id" :value="d.id">{{ d.name }}</option>
+              </select>
+            </div>
+            <div v-if="paramForm.dataset_id" class="col-span-2">
+              <label class="block text-sm font-medium text-slate-600 mb-1">Column</label>
+              <select v-model="paramForm.data_column" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none">
+                <option :value="null">— none —</option>
+                <option v-for="c in datasetColumnsForParam" :key="c" :value="c">{{ c }}</option>
+              </select>
+            </div>
+          </div>
+        </template>
+
         <div>
           <label class="block text-sm font-medium text-slate-600 mb-1">Remark <span class="text-slate-400 font-normal">· optional</span></label>
           <textarea v-model="paramForm.remark" rows="2" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none"></textarea>
@@ -1252,6 +1733,32 @@ onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick)
           <button @click="saveParam" :disabled="!paramForm.title" class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-4 py-2 disabled:opacity-50">
             Save
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card-list Log modal -->
+    <div v-if="cardLogTarget" class="fixed inset-0 bg-slate-900/30 flex items-center justify-center z-50 px-4 py-8 overflow-y-auto" @click.self="cardLogTarget = null">
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6 space-y-4 my-auto">
+        <div class="flex items-center justify-between">
+          <h3 class="font-bold text-lg">Log · {{ cardLogTarget.name }}</h3>
+          <button @click="cardLogTarget = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+        </div>
+        <div class="flex gap-2 border-b border-slate-100 pb-2">
+          <button @click="fetchCardLog(cardLogTarget, 'history')" class="text-xs font-medium px-3 py-1.5 rounded-lg" :class="cardLogTab === 'history' ? 'bg-airr-500 text-white' : 'text-slate-500 hover:bg-slate-50'">Change History</button>
+          <button @click="fetchCardLog(cardLogTarget, 'access')" class="text-xs font-medium px-3 py-1.5 rounded-lg" :class="cardLogTab === 'access' ? 'bg-airr-500 text-white' : 'text-slate-500 hover:bg-slate-50'">Access Log</button>
+        </div>
+        <div v-if="cardLogBusy" class="text-slate-400 text-sm">Loading…</div>
+        <div v-else-if="!cardLogEntries.length" class="text-slate-400 text-sm">No entries yet.</div>
+        <div v-else class="space-y-2 max-h-96 overflow-y-auto pr-1">
+          <div v-for="e in cardLogEntries" :key="e.id" class="border border-slate-100 rounded-lg p-3 text-xs">
+            <div class="flex justify-between items-center mb-1">
+              <span class="font-medium text-slate-700">{{ (e as HistoryEntry).action ?? (e as LogEntry).event }}</span>
+              <span class="text-slate-400">{{ (e as HistoryEntry).changed_by_name ?? (e as LogEntry).user_name }} · {{ new Date(e.created_at).toLocaleString() }}</span>
+            </div>
+            <pre v-if="(e as HistoryEntry).snapshot" class="text-[10px] text-slate-500 whitespace-pre-wrap break-all">{{ JSON.stringify((e as HistoryEntry).snapshot, null, 2) }}</pre>
+            <pre v-else-if="(e as LogEntry).properties && Object.keys((e as LogEntry).properties).length" class="text-[10px] text-slate-500 whitespace-pre-wrap break-all">{{ JSON.stringify((e as LogEntry).properties, null, 2) }}</pre>
+          </div>
         </div>
       </div>
     </div>

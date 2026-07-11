@@ -32,10 +32,18 @@ class ClaudeProvider implements AiProvider
 
     public function generate(string $model, string $prompt, array $options = []): string
     {
+        $userContent = $prompt;
+        if ($image = $options['image'] ?? null) {
+            $userContent = [
+                ['type' => 'image', 'source' => ['type' => 'base64', 'media_type' => $image['mime'], 'data' => $image['data']]],
+                ['type' => 'text', 'text' => $prompt],
+            ];
+        }
+
         $payload = [
             'model'      => $model,
             'max_tokens' => (int) ($options['max_tokens'] ?? 4096),
-            'messages'   => [['role' => 'user', 'content' => $prompt]],
+            'messages'   => [['role' => 'user', 'content' => $userContent]],
         ];
         if (isset($options['system'])) {
             $payload['system'] = $options['system'];

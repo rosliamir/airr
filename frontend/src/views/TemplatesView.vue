@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import AdminLayout from '../layouts/AdminLayout.vue'
 import RichEditor from '../components/RichEditor.vue'
 import ConstantsPanel from '../components/ConstantsPanel.vue'
-import { apiRequest, ApiException } from '../api/client'
+import { apiRequest, uploadFile, downloadFile, ApiException } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 type Group = { level: number; header: string | null; footer: string | null }
@@ -25,6 +25,8 @@ type Template = {
   groups?: Group[]
   parameter_screen?: string
   prompt?: string | null
+  tags?: string[]
+  archived_at?: string | null
 }
 type ConstantOpt = { placeholder: string; label: string; scope: string; type?: string; image_url?: string | null }
 type LogEntry = { id: number; action?: string; event?: string; snapshot?: unknown; properties?: Record<string, unknown>; changed_by_name?: string; user_name?: string; created_at: string }
@@ -33,7 +35,156 @@ const auth = useAuthStore()
 const canManage = auth.can('reports.create')
 
 const templates = ref<Template[]>([])
+const searchText = ref('')
+const activeTag = ref<string | null>(null)
+const allTags = computed(() => Array.from(new Set(templates.value.flatMap(t => t.tags ?? []))).sort())
+const filteredTemplates = computed(() => templates.value.filter(t => {
+  if (activeTag.value && !(t.tags ?? []).includes(activeTag.value)) return false
+  if (searchText.value && !`${t.name} ${t.description ?? ''}`.toLowerCase().includes(searchText.value.toLowerCase())) return false
+  return true
+}))
 const deletedTemplates = ref<Template[]>([])
+
+// Bulk selection + sort + archive toggle (mirrors ReportsView).
+const selectedIds = ref<Set<number>>(new Set())
+const showArchived = ref(false)
+const sortBy = ref<'-updated_at' | 'updated_at' | 'name' | '-name'>('-updated_at')
+const allSelected = computed(() => filteredTemplates.value.length > 0 && filteredTemplates.value.every(t => selectedIds.value.has(t.id)))
+function toggleSelectAll() {
+  selectedIds.value = allSelected.value ? new Set() : new Set(filteredTemplates.value.map(t => t.id))
+}
+function toggleSelect(id: number) {
+  const next = new Set(selectedIds.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  selectedIds.value = next
+}
+const sortedTemplates = computed(() => {
+  const col = sortBy.value.replace(/^-/, '') as 'updated_at' | 'name'
+  const dir = sortBy.value.startsWith('-') ? -1 : 1
+  return [...filteredTemplates.value].sort((a, b) => {
+    const av = col === 'name' ? a.name : a.updated_at
+    const bv = col === 'name' ? b.name : b.updated_at
+    return av < bv ? -1 * dir : av > bv ? 1 * dir : 0
+  })
+})
+
+// Per-card action menu
+const openMenuId = ref<number | null>(null)
+function toggleMenu(id: number) { openMenuId.value = openMenuId.value === id ? null : id }
+function closeMenuOnOutsideClick() { openMenuId.value = null }
+onMounted(() => document.addEventListener('click', closeMenuOnOutsideClick))
+onUnmounted(() => document.removeEventListener('click', closeMenuOnOutsideClick))
+
+async function duplicateTemplate(t: Template) {
+  openMenuId.value = null
+  busy.value = true
+  try {
+    await apiRequest(`/templates/${t.id}/duplicate`, { method: 'POST' })
+    await load()
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Duplicate failed'
+  } finally {
+    busy.value = false
+  }
+}
+async function exportTemplate(t: Template) {
+  openMenuId.value = null
+  try {
+    await downloadFile(`/templates/${t.id}/export`, `${t.name}.json`)
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Export failed'
+  }
+}
+async function archiveTemplate(t: Template) {
+  openMenuId.value = null
+  busy.value = true
+  try {
+    await apiRequest(`/templates/${t.id}/archive`, { method: 'POST' })
+    await load()
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Archive failed'
+  } finally {
+    busy.value = false
+  }
+}
+async function unarchiveTemplate(t: Template) {
+  openMenuId.value = null
+  busy.value = true
+  try {
+    await apiRequest(`/templates/${t.id}/unarchive`, { method: 'POST' })
+    await load()
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Unarchive failed'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function bulkDuplicate() {
+  busy.value = true
+  try {
+    for (const id of selectedIds.value) await apiRequest(`/templates/${id}/duplicate`, { method: 'POST' })
+    selectedIds.value = new Set()
+    await load()
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Duplicate failed'
+  } finally {
+    busy.value = false
+  }
+}
+async function bulkExport() {
+  for (const id of selectedIds.value) {
+    const t = templates.value.find(x => x.id === id)
+    try {
+      await downloadFile(`/templates/${id}/export`, `${t?.name ?? id}.json`)
+    } catch (e) {
+      error.value = e instanceof ApiException ? e.error.message : 'Export failed'
+    }
+  }
+}
+async function bulkArchive() {
+  busy.value = true
+  try {
+    for (const id of selectedIds.value) await apiRequest(`/templates/${id}/archive`, { method: 'POST' })
+    selectedIds.value = new Set()
+    await load()
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Archive failed'
+  } finally {
+    busy.value = false
+  }
+}
+async function bulkDelete() {
+  if (!selectedIds.value.size || !confirm(`Delete ${selectedIds.value.size} template(s)?`)) return
+  busy.value = true
+  try {
+    for (const id of selectedIds.value) await apiRequest(`/templates/${id}`, { method: 'DELETE' })
+    selectedIds.value = new Set()
+    await load()
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Delete failed'
+  } finally {
+    busy.value = false
+  }
+}
+
+// Import
+const importInput = ref<HTMLInputElement | null>(null)
+function triggerImport() { importInput.value?.click() }
+async function onImportFile(ev: Event) {
+  const file = (ev.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const fd = new FormData()
+  fd.append('file', file)
+  try {
+    await uploadFile('/templates/import', fd)
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Import failed'
+  } finally {
+    await load()
+    ;(ev.target as HTMLInputElement).value = ''
+  }
+}
 const constants = ref<ConstantOpt[]>([])
 const projects = ref<{ id: number; code: string; name: string }[]>([])
 const dataSources = ref<DataSourceOpt[]>([])
@@ -65,8 +216,9 @@ const genBusy = ref<string | null>(null)
 async function load() {
   loading.value = true
   try {
+    const archivedParam = showArchived.value ? '&include_archived=1' : ''
     const [tRes, cRes, pRes] = await Promise.all([
-      apiRequest<{ data: Template[] }>('/templates?with_trashed=1'),
+      apiRequest<{ data: Template[] }>(`/templates?with_trashed=1${archivedParam}`),
       apiRequest<{ data: ConstantOpt[] }>('/constants'),
       apiRequest<{ data: { id: number; code: string; name: string }[] }>('/projects'),
     ])
@@ -97,9 +249,12 @@ function emptyForm() {
   }
 }
 
+const tagsText = ref('')
+
 function openCreate() {
   editing.value = null
   form.value = emptyForm()
+  tagsText.value = ''
   sectionTab.value = 'header'
   showForm.value = true
 }
@@ -114,6 +269,7 @@ async function openEdit(t: Template) {
     page_header: full.page_header ?? '', page_footer: full.page_footer ?? '',
     parameter_screen: full.parameter_screen ?? '', groups: full.groups ?? [], prompt: full.prompt ?? '',
   }
+  tagsText.value = (full.tags ?? []).join(', ')
   sectionTab.value = 'header'
   showForm.value = true
 }
@@ -149,7 +305,8 @@ async function save() {
       if (f) g.footer = f.getRaw()
     })
 
-    const payload = { ...form.value }
+    const tags = tagsText.value.split(',').map(s => s.trim().replace(/^#/, '')).filter(Boolean)
+    const payload = { ...form.value, tags }
     const path = editing.value ? `/templates/${editing.value.id}` : '/templates'
     await apiRequest(path, { method: editing.value ? 'PUT' : 'POST', body: JSON.stringify(payload) })
     showForm.value = false
@@ -224,37 +381,101 @@ async function fetchLog(t: Template, tab: 'access' | 'history') {
   }
 }
 
+watch(showArchived, load)
 onMounted(load)
 </script>
 
 <template>
   <AdminLayout>
     <div class="space-y-4">
-      <div class="flex items-center justify-between">
+      <div class="flex items-center justify-between gap-3">
         <p class="text-sm text-slate-500">Reusable report layouts — header/footer, page banners, group bands, and the parameter screen.</p>
-        <button v-if="canManage" @click="openCreate" class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5">+ New Template</button>
+        <div class="flex items-center gap-2 shrink-0">
+          <input v-model="searchText" placeholder="Search templates…" class="text-sm rounded-lg border border-slate-200 px-3 py-1.5 outline-none focus:ring-2 focus:ring-airr-300 w-48" />
+          <template v-if="canManage">
+            <button @click="triggerImport" class="text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5">Import</button>
+            <input ref="importInput" type="file" accept=".json,application/json" class="hidden" @change="onImportFile" />
+          </template>
+          <button v-if="canManage" @click="openCreate" class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5">+ New Template</button>
+        </div>
+      </div>
+
+      <div v-if="allTags.length" class="flex flex-wrap items-center gap-1.5">
+        <span class="text-xs text-slate-400">Filter by hashtag:</span>
+        <button v-for="tag in allTags" :key="tag" @click="activeTag = activeTag === tag ? null : tag"
+          class="text-xs rounded-full px-2.5 py-1"
+          :class="activeTag === tag ? 'bg-airr-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'">
+          #{{ tag }}
+        </button>
       </div>
 
       <p v-if="error" class="text-sm text-airr-700 bg-airr-50 rounded-lg px-3 py-2">{{ error }}</p>
 
+      <!-- Controls: select-all, sort, archived toggle, bulk actions -->
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div class="flex items-center gap-3">
+          <label class="flex items-center gap-1.5 text-xs text-slate-500">
+            <input type="checkbox" :checked="allSelected" @change="toggleSelectAll" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" />
+            Select all
+          </label>
+          <label class="flex items-center gap-1.5 text-xs text-slate-500">
+            <input type="checkbox" v-model="showArchived" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" />
+            Show archived
+          </label>
+          <select v-model="sortBy" class="text-xs rounded-lg border border-slate-200 px-2 py-1.5 outline-none focus:ring-2 focus:ring-airr-300">
+            <option value="-updated_at">Newest first</option>
+            <option value="updated_at">Oldest first</option>
+            <option value="name">Name A–Z</option>
+            <option value="-name">Name Z–A</option>
+          </select>
+        </div>
+        <div v-if="selectedIds.size" class="flex items-center gap-2">
+          <span class="text-xs text-slate-400">{{ selectedIds.size }} selected</span>
+          <button @click="bulkDuplicate" :disabled="busy" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Duplicate</button>
+          <button @click="bulkExport" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Export</button>
+          <button @click="bulkArchive" :disabled="busy" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Archive</button>
+          <button @click="bulkDelete" :disabled="busy" class="text-xs font-medium text-rose-600 border border-rose-200 hover:bg-rose-50 rounded-lg px-2.5 py-1.5">Delete</button>
+        </div>
+      </div>
+
       <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <div v-if="loading" class="text-slate-400 text-sm">Loading…</div>
-        <div v-else-if="!templates.length" class="text-slate-400 text-sm">No templates yet.</div>
-        <div v-for="t in templates" :key="t.id" class="bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-2">
+        <div v-else-if="!sortedTemplates.length" class="text-slate-400 text-sm">No templates match.</div>
+        <div v-for="t in sortedTemplates" :key="t.id" class="relative bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-2 hover:border-slate-200 transition"
+          :class="t.archived_at ? 'opacity-50' : ''">
           <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0">
-              <div class="font-semibold text-slate-700 truncate">{{ t.name }}</div>
-              <div class="text-xs text-slate-400">{{ t.project?.code ?? 'global' }}</div>
+            <div class="flex items-start gap-2 min-w-0 cursor-pointer" @click="openEdit(t)">
+              <input type="checkbox" :checked="selectedIds.has(t.id)" @click.stop @change="toggleSelect(t.id)"
+                class="mt-1 rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
+              <div class="min-w-0">
+                <div class="font-semibold text-slate-700 truncate">{{ t.name }}</div>
+                <div class="text-xs text-slate-400">{{ t.project?.code ?? 'global' }}</div>
+              </div>
             </div>
-            <span class="text-xs font-medium rounded-full px-2 py-0.5 shrink-0" :class="t.scope === 'global' ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'">{{ t.scope }}</span>
+            <div class="flex items-center gap-1 shrink-0">
+              <span v-if="t.archived_at" class="text-[10px] rounded-full px-1.5 py-0.5 bg-slate-200 text-slate-500">archived</span>
+              <span class="text-xs font-medium rounded-full px-2 py-0.5" :class="t.scope === 'global' ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'">{{ t.scope }}</span>
+              <!-- Per-card action menu -->
+              <div class="relative">
+                <button @click.stop="toggleMenu(t.id)" class="text-slate-400 hover:text-slate-600 px-1 rounded hover:bg-slate-100">⋮</button>
+                <div v-if="openMenuId === t.id"
+                  class="absolute right-0 top-full mt-1 w-40 bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-1 text-xs">
+                  <button @click.stop="duplicateTemplate(t)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Duplicate</button>
+                  <button @click.stop="exportTemplate(t)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Export</button>
+                  <button @click.stop="openLog(t); openMenuId = null" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Log</button>
+                  <div class="border-t border-slate-100 my-1"></div>
+                  <button v-if="!t.archived_at" @click.stop="archiveTemplate(t)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Archive</button>
+                  <button v-else @click.stop="unarchiveTemplate(t)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Unarchive</button>
+                  <button @click.stop="remove(t); openMenuId = null" class="w-full text-left px-3 py-1.5 hover:bg-rose-50 text-rose-600">Delete</button>
+                </div>
+              </div>
+            </div>
           </div>
-          <p v-if="t.description" class="text-xs text-slate-500 line-clamp-2">{{ t.description }}</p>
-          <div class="text-xs text-slate-400">by {{ t.creator?.name ?? '—' }}</div>
-          <div class="flex gap-3 pt-1 mt-auto">
-            <button @click="openEdit(t)" class="text-xs text-airr-600 hover:underline">{{ canManage ? 'Edit' : 'View' }}</button>
-            <button @click="openLog(t)" class="text-xs text-slate-500 hover:underline">Log</button>
-            <button v-if="canManage" @click="remove(t)" :disabled="busy" class="text-xs text-rose-600 hover:underline">Delete</button>
+          <p v-if="t.description" class="text-xs text-slate-500 line-clamp-2 cursor-pointer" @click="openEdit(t)">{{ t.description }}</p>
+          <div v-if="t.tags?.length" class="flex flex-wrap gap-1">
+            <span v-for="tag in t.tags" :key="tag" class="text-[10px] bg-airr-50 text-airr-600 rounded-full px-2 py-0.5">#{{ tag }}</span>
           </div>
+          <div class="text-xs text-slate-400 mt-auto cursor-pointer" @click="openEdit(t)">by {{ t.creator?.name ?? '—' }}</div>
         </div>
       </div>
 
@@ -292,6 +513,11 @@ onMounted(load)
         <div>
           <label class="block text-sm font-medium text-slate-600 mb-1">Description</label>
           <input v-model="form.description" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Hashtags <span class="text-slate-400 font-normal">(comma-separated, e.g. kutipan, pbt)</span></label>
+          <input v-model="tagsText" placeholder="kutipan, pbt" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
         </div>
 
         <!-- Default datasource/dataset — used to preview and resolve {{DATA:X}} constants for this template -->
@@ -427,7 +653,7 @@ onMounted(load)
           <div v-for="e in logEntries" :key="e.id" class="border border-slate-100 rounded-lg p-3 text-xs">
             <div class="flex justify-between items-center mb-1">
               <span class="font-medium text-slate-700">{{ e.action ?? e.event }}</span>
-              <span class="text-slate-400">{{ e.changed_by_name ?? e.user_name }} · {{ e.created_at }}</span>
+              <span class="text-slate-400">{{ e.changed_by_name ?? e.user_name }} · {{ new Date(e.created_at).toLocaleString() }}</span>
             </div>
             <pre v-if="e.snapshot" class="text-[10px] text-slate-500 whitespace-pre-wrap break-all">{{ JSON.stringify(e.snapshot, null, 2) }}</pre>
             <pre v-else-if="e.properties && Object.keys(e.properties).length" class="text-[10px] text-slate-500 whitespace-pre-wrap break-all">{{ JSON.stringify(e.properties, null, 2) }}</pre>

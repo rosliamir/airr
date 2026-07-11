@@ -171,6 +171,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('reports/{report}/lock', [ReportController::class, 'lock']);
         Route::post('reports/{report}/unlock', [ReportController::class, 'unlock']);
         Route::post('reports/{report}/generate-from-prompt', [ReportController::class, 'generateFromPrompt']);
+        Route::delete('reports/{report}/history', [ReportController::class, 'clearHistory']);
     });
     Route::get('reports/{report}/history', [ReportController::class, 'history'])->middleware('permission:reports.view');
     Route::get('reports/{report}/logs', [ReportController::class, 'logs'])->middleware('permission:reports.view');
@@ -181,9 +182,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('templates/{template}', [TemplateController::class, 'show']);
     Route::get('templates/{template}/history', [TemplateController::class, 'history']);
     Route::get('templates/{template}/logs', [TemplateController::class, 'logs']);
+    Route::get('templates/{template}/export', [TemplateController::class, 'export']);
     Route::middleware('permission:reports.create')->group(function () {
         Route::post('templates', [TemplateController::class, 'store']);
+        Route::post('templates/import', [TemplateController::class, 'import']);
         Route::post('templates/fill-from-prompt', [TemplateController::class, 'fillFromPrompt']);
+        Route::post('templates/{template}/duplicate', [TemplateController::class, 'duplicate']);
+        Route::post('templates/{template}/archive', [TemplateController::class, 'archive']);
+        Route::post('templates/{template}/unarchive', [TemplateController::class, 'unarchive']);
         Route::put('templates/{template}', [TemplateController::class, 'update']);
         Route::post('templates/{id}/restore', [TemplateController::class, 'restore']);
         Route::delete('templates/{template}', [TemplateController::class, 'destroy']);
@@ -211,10 +217,17 @@ Route::middleware('auth:sanctum')->group(function () {
     // M14 — projects (reports are stored by project)
     Route::get('projects', [ProjectController::class, 'index'])->middleware('permission:projects.view');
     Route::get('projects/{project}', [ProjectController::class, 'show'])->middleware('permission:projects.view');
+    Route::get('projects/{project}/logs', [ProjectController::class, 'logs'])->middleware('permission:projects.view');
+    Route::get('projects/{project}/export', [ProjectController::class, 'export'])->middleware('permission:projects.view');
     Route::middleware('permission:projects.manage')->group(function () {
         Route::post('projects', [ProjectController::class, 'store']);
+        Route::post('projects/import', [ProjectController::class, 'import']);
+        Route::post('projects/{project}/duplicate', [ProjectController::class, 'duplicate']);
         Route::put('projects/{project}', [ProjectController::class, 'update']);
         Route::delete('projects/{project}', [ProjectController::class, 'destroy']);
+        Route::post('projects/{id}/restore', [ProjectController::class, 'restore']);
+        Route::post('projects/{project}/archive', [ProjectController::class, 'archive']);
+        Route::post('projects/{project}/unarchive', [ProjectController::class, 'unarchive']);
         // Quick link management from the project card
         Route::get('projects/{project}/report-links', [ProjectController::class, 'reportLinks']);
         Route::put('projects/{project}/reports', [ProjectController::class, 'syncReports']);

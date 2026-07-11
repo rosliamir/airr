@@ -3,6 +3,8 @@
 namespace App\Services\Reporting;
 
 use App\Models\Report;
+use App\Services\ConstantResolver;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * M6 (FR-M6.2/M6.3) — deterministic render engine. Turns a report definition +
@@ -12,6 +14,8 @@ use App\Models\Report;
  */
 class ReportRenderer
 {
+    public function __construct(private ConstantResolver $constants) {}
+
     /** @param array{columns:array,rows:array} $data */
     public function render(Report $report, array $data): string
     {
@@ -19,6 +23,18 @@ class ReportRenderer
         $type = $def['type'] ?? $report->type ?? 'table';
         $rows = $data['rows'] ?? [];
         $columns = $this->columns($def, $data['columns'] ?? []);
+        // A calc expression may reference {{SYSTEM:KEY}}/{{GLOBAL:KEY}}/{{PROJECT:KEY}}
+        // constants (e.g. "jumlah_bayaran * {{GLOBAL:SST}}") — resolve those tokens to
+        // their literal DB value once per column (not per row, they're row-independent).
+        $projectId = $report->project_id ?? null;
+        $user = Auth::user();
+        $columns = array_map(function ($c) use ($projectId, $user) {
+            if ($c['calc']) {
+                $c['calc'] = $this->constants->resolve($c['calc'], $projectId, $user);
+            }
+
+            return $c;
+        }, $columns);
 
         $body = match ($type) {
             'grouped' => $this->grouped($def, $columns, $rows),
@@ -36,35 +52,134 @@ class ReportRenderer
     {
         if (! empty($def['columns'])) {
             return array_map(fn ($c) => [
-                'field'  => $c['field'],
-                'label'  => $c['label'] ?? $this->humanize($c['field']),
-                'format' => $c['format'] ?? 'text',
+                'field'     => $c['field'],
+                'label'     => $c['label'] ?? $this->humanize($c['field']),
+                'format'    => $c['format'] ?? 'text',
+                'value_map' => $c['value_map'] ?? null,
+                'calc'      => $c['calc'] ?? null,
+                'align'     => $c['align'] ?? null,
             ], $def['columns']);
         }
 
-        return array_map(fn ($f) => ['field' => $f, 'label' => $this->humanize($f), 'format' => 'text'], $datasetColumns);
+        return array_map(fn ($f) => ['field' => $f, 'label' => $this->humanize($f), 'format' => 'text', 'value_map' => null, 'calc' => null, 'align' => null], $datasetColumns);
+    }
+
+    private function alignClass(array $c): string
+    {
+        return match ($c['align'] ?? null) {
+            'right'  => ' text-right',
+            'center' => ' text-center',
+            default  => '',
+        };
+    }
+
+    // Resolve a cell's display value: calc (computed from other fields) takes the
+    // raw value's place, then value_map (categorical label lookup, e.g. status
+    // 0 -> "Active") takes priority over the plain format() rendering — a mapped
+    // value IS the display text, not something to further number/date-format.
+    private function cellValue(array $c, array $row): string
+    {
+        $raw = $c['calc'] ? $this->evalExpr((string) $c['calc'], $row) : ($row[$c['field']] ?? null);
+
+        if (is_array($c['value_map'] ?? null)) {
+            $key = (string) $raw;
+            if (array_key_exists($key, $c['value_map'])) {
+                return (string) $c['value_map'][$key];
+            }
+            if (array_key_exists('*', $c['value_map'])) {
+                return (string) $c['value_map']['*'];
+            }
+        }
+
+        return $this->fmt($raw, $c['format']);
+    }
+
+    // Minimal safe arithmetic evaluator for "calc" columns (e.g. "qty * price" or
+    // "(price - discount) * qty") — supports + - * / and parentheses over row
+    // field names and numeric literals. No eval(): tokenize then recursive-descent
+    // parse, so a malformed/malicious expression can only throw, never execute code.
+    private function evalExpr(string $expr, array $row): float|int|null
+    {
+        try {
+            preg_match_all('/[A-Za-z_][A-Za-z0-9_]*|\d+\.?\d*|[()+\-*\/]/', $expr, $m);
+            $tokens = $m[0];
+            $pos = 0;
+            $peek = function () use (&$pos, $tokens) { return $tokens[$pos] ?? null; };
+            $next = function () use (&$pos, $tokens) { return $tokens[$pos++] ?? null; };
+
+            // Factor/term/expr are mutually recursive — declared first, assigned below.
+            $parseExpr = null; $parseTerm = null; $parseFactor = null;
+            $parseFactor = function () use (&$parseExpr, $peek, $next, $row) {
+                $t = $next();
+                if ($t === '(') {
+                    $v = $parseExpr();
+                    $next(); // consume ')'
+                    return $v;
+                }
+                if ($t === null) {
+                    throw new \RuntimeException('Unexpected end of expression');
+                }
+                if (is_numeric($t)) {
+                    return (float) $t;
+                }
+                return (float) ($row[$t] ?? 0); // bare identifier = row field
+            };
+            $parseTerm = function () use (&$parseFactor, $peek, $next) {
+                $v = $parseFactor();
+                while (in_array($peek(), ['*', '/'], true)) {
+                    $op = $next();
+                    $rhs = $parseFactor();
+                    $v = $op === '*' ? $v * $rhs : ($rhs != 0 ? $v / $rhs : 0);
+                }
+                return $v;
+            };
+            $parseExpr = function () use (&$parseTerm, $peek, $next) {
+                $v = $parseTerm();
+                while (in_array($peek(), ['+', '-'], true)) {
+                    $op = $next();
+                    $rhs = $parseTerm();
+                    $v = $op === '+' ? $v + $rhs : $v - $rhs;
+                }
+                return $v;
+            };
+
+            $result = $parseExpr();
+            $rounded = round($result, 4);
+
+            return $rounded == (int) $rounded ? (int) $rounded : $rounded;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     // --- renderers ---
 
     private function table(array $columns, array $rows, array $def): string
     {
-        $head = implode('', array_map(
-            fn ($c) => '<th class="text-left font-semibold text-slate-600 px-3 py-2 border-b border-slate-200">' . e($c['label']) . '</th>',
+        $showRowNumber = (bool) ($def['show_row_number'] ?? false);
+        $striped = (bool) ($def['striped'] ?? false);
+
+        $numberHead = $showRowNumber ? '<th class="text-left font-semibold text-slate-600 px-3 py-2 border-b border-slate-200 w-10">#</th>' : '';
+        $head = $numberHead . implode('', array_map(
+            fn ($c) => '<th class="text-left font-semibold text-slate-600 px-3 py-2 border-b border-slate-200' . $this->alignClass($c) . '">' . e($c['label']) . '</th>',
             $columns,
         ));
 
         $body = '';
+        $i = 0;
         foreach ($rows as $row) {
-            $tds = '';
+            $i++;
+            $rowClass = $striped && $i % 2 === 0 ? ' class="bg-slate-50"' : '';
+            $numberCell = $showRowNumber ? '<td class="px-3 py-1.5 border-b border-slate-100 text-slate-400">' . $i . '</td>' : '';
+            $tds = $numberCell;
             foreach ($columns as $c) {
-                $tds .= '<td class="px-3 py-1.5 border-b border-slate-100' . $this->condClass($def, $c['field'], $row) . '">'
-                    . e($this->fmt($row[$c['field']] ?? null, $c['format'])) . '</td>';
+                $tds .= '<td class="px-3 py-1.5 border-b border-slate-100' . $this->alignClass($c) . $this->condClass($def, $c['field'], $row) . '">'
+                    . e($this->cellValue($c, $row)) . '</td>';
             }
-            $body .= "<tr>{$tds}</tr>";
+            $body .= "<tr{$rowClass}>{$tds}</tr>";
         }
         if (! $rows) {
-            $body = '<tr><td class="px-3 py-4 text-slate-400" colspan="' . count($columns) . '">No data.</td></tr>';
+            $body = '<tr><td class="px-3 py-4 text-slate-400" colspan="' . (count($columns) + ($showRowNumber ? 1 : 0)) . '">No data.</td></tr>';
         }
 
         return '<table class="w-full text-sm border-collapse"><thead><tr>' . $head . '</tr></thead><tbody>' . $body . '</tbody></table>';
@@ -165,8 +280,15 @@ class ReportRenderer
                 continue;
             }
             if ($this->matches($row[$field] ?? null, $rule['op'] ?? '=', $rule['value'] ?? null)) {
-                $color = $rule['style']['color'] ?? null;
-                return $color ? ' ' . $this->colorClass($color) : '';
+                $classes = [];
+                if ($color = $rule['style']['color'] ?? null) {
+                    $classes[] = $this->colorClass($color);
+                }
+                if ($bg = $rule['style']['background'] ?? null) {
+                    $classes[] = $this->bgClass($bg);
+                }
+
+                return $classes ? ' ' . implode(' ', $classes) : '';
             }
         }
 
@@ -196,18 +318,50 @@ class ReportRenderer
         };
     }
 
+    private function bgClass(string $color): string
+    {
+        return match ($color) {
+            'red'    => 'bg-rose-50',
+            'green'  => 'bg-emerald-50',
+            'amber'  => 'bg-amber-50',
+            'gray', 'grey' => 'bg-slate-100',
+            default  => '',
+        };
+    }
+
     // --- helpers ---
+
+    // Date-like formats parse the raw value once, then re-print it — if parsing
+    // fails (not actually a date), fall back to the raw value untouched.
+    private const DATE_FORMATS = [
+        'date'          => 'Y-m-d',
+        'date_dmy'      => 'd/m/Y',
+        'date_mdy'      => 'm/d/Y',
+        'datetime'      => 'Y-m-d H:i:s',
+        'datetime_dmy'  => 'd/m/Y H:i:s',
+    ];
 
     private function fmt($value, string $format): string
     {
         if ($value === null) {
             return '';
         }
+        if (isset(self::DATE_FORMATS[$format])) {
+            try {
+                return \Carbon\Carbon::parse((string) $value)->format(self::DATE_FORMATS[$format]);
+            } catch (\Throwable) {
+                return (string) $value;
+            }
+        }
+
         return match ($format) {
-            'number'   => is_numeric($value) ? rtrim(rtrim(number_format((float) $value, 2), '0'), '.') : (string) $value,
-            'currency' => 'RM ' . number_format((float) $value, 2),
-            'percent'  => number_format((float) $value, 1) . '%',
-            default    => (string) $value,
+            // Trims trailing zeros/decimal point — 40.80 -> "40.8", 420.00 -> "420".
+            'number'       => is_numeric($value) ? rtrim(rtrim(number_format((float) $value, 2), '0'), '.') : (string) $value,
+            // ALWAYS shows exactly 2 decimals with a thousands separator, e.g. "9,999.99".
+            'number_fixed' => is_numeric($value) ? number_format((float) $value, 2) : (string) $value,
+            'currency'     => 'RM ' . number_format((float) $value, 2),
+            'percent'      => number_format((float) $value, 1) . '%',
+            default        => (string) $value,
         };
     }
 
@@ -218,9 +372,41 @@ class ReportRenderer
 
     private function frame(Report $report, string $body): string
     {
+        $def = $report->definition ?? [];
+        $enabled = $def['fixed_parameters_enabled'] ?? [];
+        $projectId = $report->project_id ?? null;
+        $user = Auth::user();
+
+        $headerHtml = ($enabled['template_header'] ?? true) ? $this->templateSectionHtml($def['template_header_id'] ?? null, ['header', 'page_header'], $projectId, $user) : '';
+        $footerHtml = ($enabled['template_footer'] ?? true) ? $this->templateSectionHtml($def['template_footer_id'] ?? null, ['footer', 'page_footer'], $projectId, $user) : '';
+
         return '<div class="airr-report space-y-3">'
+            . ($headerHtml !== '' ? '<div class="airr-report-header">' . $headerHtml . '</div>' : '')
             . '<h1 class="text-lg font-bold text-slate-800">' . e($report->name) . '</h1>'
             . ($report->description ? '<p class="text-sm text-slate-500">' . e($report->description) . '</p>' : '')
-            . '<div>' . $body . '</div></div>';
+            . '<div>' . $body . '</div>'
+            . ($footerHtml !== '' ? '<div class="airr-report-footer">' . $footerHtml . '</div>' : '')
+            . '</div>';
+    }
+
+    // Pull the chosen Template's header/footer HTML (first non-empty field of
+    // the given fallback list) and resolve any {{SYSTEM:...}}/{{GLOBAL:...}}/
+    // {{PROJECT:...}} constants inside it before it's embedded in the output.
+    private function templateSectionHtml(?int $templateId, array $fields, ?int $projectId, $user): string
+    {
+        if (! $templateId) {
+            return '';
+        }
+        $template = \App\Models\Template::find($templateId);
+        if (! $template) {
+            return '';
+        }
+        foreach ($fields as $field) {
+            if (! empty($template->{$field})) {
+                return $this->constants->resolve((string) $template->{$field}, $projectId, $user);
+            }
+        }
+
+        return '';
     }
 }

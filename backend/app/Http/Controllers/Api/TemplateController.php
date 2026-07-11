@@ -39,8 +39,88 @@ class TemplateController extends Controller
             $query->where(fn ($q) => $q->where('created_by', $viewer->id)
                 ->orWhereHas('project', fn ($p) => $p->visibleTo($viewer)));
         }
+        if (! $request->boolean('include_archived')) {
+            $query->whereNull('archived_at');
+        }
 
         return $this->sendOk($query->orderBy('name')->get()->map(fn ($t) => $this->row($t)));
+    }
+
+    public function archive(Request $request, Template $template): JsonResponse
+    {
+        $template->update(['archived_at' => now()]);
+        $this->audit->log('template.archived', Template::class, $template->id);
+
+        return $this->sendOk($this->row($template->fresh(['project', 'creator'])));
+    }
+
+    public function unarchive(Request $request, Template $template): JsonResponse
+    {
+        $template->update(['archived_at' => null]);
+        $this->audit->log('template.unarchived', Template::class, $template->id);
+
+        return $this->sendOk($this->row($template->fresh(['project', 'creator'])));
+    }
+
+    public function duplicate(Request $request, Template $template): JsonResponse
+    {
+        $copy = Template::create([
+            'name' => $template->name . ' (Copy)', 'description' => $template->description,
+            'project_id' => $template->project_id, 'data_source_id' => $template->data_source_id,
+            'dataset_id' => $template->dataset_id, 'header' => $template->header, 'body' => $template->body,
+            'footer' => $template->footer, 'page_header' => $template->page_header, 'page_footer' => $template->page_footer,
+            'groups' => $template->groups, 'parameter_screen' => $template->parameter_screen,
+            'meta' => $template->meta, 'tags' => $template->tags, 'created_by' => $request->user()->id,
+        ]);
+        $this->audit->log('template.duplicated', Template::class, $copy->id, null, ['from' => $template->id]);
+
+        return $this->sendCreated($this->row($copy->fresh(['project', 'creator'])));
+    }
+
+    public function export(Template $template): \Symfony\Component\HttpFoundation\Response
+    {
+        $payload = [
+            'name' => $template->name, 'description' => $template->description,
+            'header' => $template->header, 'body' => $template->body, 'footer' => $template->footer,
+            'page_header' => $template->page_header, 'page_footer' => $template->page_footer,
+            'groups' => $template->groups ?? [], 'parameter_screen' => $template->parameter_screen,
+            'tags' => $template->tags ?? [], 'exported_at' => now()->toIso8601String(),
+        ];
+        $filename = \Illuminate\Support\Str::slug($template->name) . '.json';
+
+        return response()->json($payload)->header('Content-Disposition', "attachment; filename=\"{$filename}\"");
+    }
+
+    public function import(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'file' => 'nullable|file|mimes:json,txt|max:2048',
+            'payload' => 'nullable|array',
+            'project_id' => 'nullable|integer|exists:projects,id',
+        ]);
+        if ($request->hasFile('file')) {
+            $decoded = json_decode($request->file('file')->get(), true);
+            if (json_last_error() !== JSON_ERROR_NONE || ! is_array($decoded)) {
+                return $this->sendError(422, 'INVALID_JSON', 'The uploaded file is not valid JSON.');
+            }
+        } else {
+            $decoded = $data['payload'] ?? null;
+        }
+        if (! $decoded || empty($decoded['name'])) {
+            return $this->sendError(422, 'INVALID_PAYLOAD', 'Provide a file or payload with at least a "name".');
+        }
+
+        $template = Template::create([
+            'name' => $decoded['name'], 'description' => $decoded['description'] ?? null,
+            'project_id' => $data['project_id'] ?? null,
+            'header' => $decoded['header'] ?? null, 'body' => $decoded['body'] ?? null, 'footer' => $decoded['footer'] ?? null,
+            'page_header' => $decoded['page_header'] ?? null, 'page_footer' => $decoded['page_footer'] ?? null,
+            'groups' => $decoded['groups'] ?? [], 'parameter_screen' => $decoded['parameter_screen'] ?? null,
+            'tags' => $decoded['tags'] ?? [], 'created_by' => $request->user()->id,
+        ]);
+        $this->audit->log('template.imported', Template::class, $template->id);
+
+        return $this->sendCreated($this->row($template->fresh(['project', 'creator'])));
     }
 
     public function show(Template $template): JsonResponse
@@ -99,7 +179,7 @@ class TemplateController extends Controller
             'action'          => $r->action,
             'snapshot'        => json_decode($r->snapshot, true),
             'changed_by_name' => $r->changed_by_name,
-            'created_at'      => $r->created_at,
+            'created_at'      => \Carbon\Carbon::parse($r->created_at, 'UTC')->toIso8601String(),
         ]));
     }
 
@@ -119,7 +199,7 @@ class TemplateController extends Controller
             'action'     => $r->action,
             'properties' => json_decode($r->new_values ?? '{}', true),
             'user_name'  => $r->user_name ?? 'System',
-            'created_at' => $r->created_at,
+            'created_at' => \Carbon\Carbon::parse($r->created_at, 'UTC')->toIso8601String(),
         ]));
     }
 
@@ -168,6 +248,8 @@ class TemplateController extends Controller
             'groups.*.header'       => 'nullable|string',
             'groups.*.footer'       => 'nullable|string',
             'prompt'                => 'nullable|string|max:2000',
+            'tags'                  => 'nullable|array',
+            'tags.*'                => 'string|max:40',
         ]);
 
         if (array_key_exists('prompt', $data)) {
@@ -191,6 +273,8 @@ class TemplateController extends Controller
             'creator'     => $t->creator ? ['id' => $t->creator->id, 'name' => $t->creator->name] : null,
             'updated_at'  => $t->updated_at,
             'deleted_at'  => $t->deleted_at?->toISOString(),
+            'archived_at' => $t->archived_at?->toISOString(),
+            'tags'        => $t->tags ?? [],
         ];
 
         if ($withSections) {

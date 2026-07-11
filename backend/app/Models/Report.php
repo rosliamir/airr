@@ -24,14 +24,14 @@ class Report extends Model
 
     protected $fillable = [
         'project_id', 'dataset_id', 'name', 'description', 'type', 'definition', 'status', 'archived_at', 'created_by',
-        'version', 'layout', 'printout_size', 'printout_width', 'printout_height', 'output_formats', 'locked',
+        'version', 'layout', 'printout_size', 'printout_width', 'printout_height', 'output_formats', 'locked', 'tags',
     ];
 
     protected function casts(): array
     {
         return [
             'definition' => 'array', 'archived_at' => 'datetime',
-            'output_formats' => 'array', 'locked' => 'boolean',
+            'output_formats' => 'array', 'locked' => 'boolean', 'tags' => 'array',
         ];
     }
 

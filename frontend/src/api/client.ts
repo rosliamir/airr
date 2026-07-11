@@ -38,6 +38,36 @@ export async function uploadFile<T>(path: string, form: FormData): Promise<T> {
   return json as T
 }
 
+// Authenticated file download — window.open()/plain <a href> can't attach the
+// Bearer token (auth is header-based, not cookie-based), so any endpoint that
+// returns a file must go through fetch() + Blob like this instead.
+export async function downloadFile(path: string, suggestedName = 'download'): Promise<void> {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  const t = token()
+  if (t) headers.Authorization = `Bearer ${t}`
+
+  const res = await fetch(`${API_BASE_URL}/api${path}`, { headers })
+  if (!res.ok) {
+    const json = await res.json().catch(() => null)
+    const error: ApiError = json?.error ?? { code: 'UNKNOWN', message: res.statusText }
+    throw new ApiException(res.status, error)
+  }
+
+  const disposition = res.headers.get('Content-Disposition') ?? ''
+  const match = disposition.match(/filename="?([^"]+)"?/)
+  const filename = match?.[1] ?? suggestedName
+
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     Accept: 'application/json',

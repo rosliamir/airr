@@ -24,7 +24,10 @@ interface AiProvider
     /**
      * Generate a completion for the given prompt.
      *
-     * @param  array<string,mixed>  $options  e.g. ['temperature' => 0.2, 'system' => '...']
+     * @param  array<string,mixed>  $options  e.g. ['temperature' => 0.2, 'system' => '...',
+     *                                        'image' => ['data' => base64string, 'mime' => 'image/png']]
+     *                                        (image is vision input — ignored by providers/models that
+     *                                        don't support it)
      */
     public function generate(string $model, string $prompt, array $options = []): string;
 

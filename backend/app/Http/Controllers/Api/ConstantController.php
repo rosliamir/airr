@@ -90,7 +90,7 @@ class ConstantController extends Controller
             'action'          => $r->action,
             'snapshot'        => json_decode($r->snapshot, true),
             'changed_by_name' => $r->changed_by_name,
-            'created_at'      => $r->created_at,
+            'created_at'      => \Carbon\Carbon::parse($r->created_at, 'UTC')->toIso8601String(),
         ]));
     }
 

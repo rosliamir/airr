@@ -4,7 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Traits\ApiResponse;
+use App\Models\Constant;
+use App\Models\DataSource;
+use App\Models\Dataset;
 use App\Models\Report;
+use App\Models\Template;
 use App\Services\Ai\AiProvider;
 use App\Services\Ai\ModelResolver;
 use App\Services\AuditService;
@@ -56,7 +60,7 @@ class ReportController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $query = Report::query()->with(['project:id,code,name', 'dataset:id,name', 'creator:id,name']);
+        $query = Report::query()->with(['project:id,code,name', 'dataset:id,name,data_source_id', 'creator:id,name']);
 
         $viewer = $request->user();
         if (! $viewer->seesEverything()) {
@@ -133,18 +137,96 @@ class ReportController extends Controller
         return $this->sendOk($this->row($report->fresh(['project', 'dataset'])));
     }
 
-    // Download the report as a portable JSON file (definition + metadata).
+    // Download the report as a SELF-CONTAINED JSON bundle: the report definition
+    // itself, plus everything it depends on to actually run somewhere else —
+    // its dataset + data source (connection secrets redacted — see below),
+    // attached templates, and every {{SCOPE:KEY}} constant referenced anywhere
+    // in the definition or templates.
     public function export(Request $request, Report $report): \Symfony\Component\HttpFoundation\Response
     {
         $this->authorizeReport($request, $report, 'view');
+        $report->loadMissing(['dataset.dataSource', 'templates']);
 
         $payload = [
-            'name'        => $report->name,
-            'description' => $report->description,
-            'type'        => $report->type,
-            'definition'  => $report->definition ?? [],
-            'exported_at' => now()->toIso8601String(),
+            'name'            => $report->name,
+            'description'     => $report->description,
+            'type'            => $report->type,
+            'definition'      => $report->definition ?? [],
+            'layout'          => $report->layout,
+            'printout_size'   => $report->printout_size,
+            'printout_width'  => $report->printout_width,
+            'printout_height' => $report->printout_height,
+            'output_formats'  => $report->output_formats ?? [],
+            'exported_at'     => now()->toIso8601String(),
         ];
+
+        $scanText = json_encode($report->definition ?? []);
+
+        if ($report->dataset) {
+            $ds = $report->dataset;
+            $payload['dataset'] = [
+                'name'        => $ds->name,
+                'description' => $ds->description,
+                'query'       => $ds->query,
+                'method'      => $ds->method,
+                'body'        => $ds->body,
+                'fields'      => $ds->fields ?? [],
+                'parameters'  => $ds->parameters ?? [],
+            ];
+            $scanText .= ' ' . $ds->query . ' ' . $ds->body;
+
+            if ($ds->dataSource) {
+                $payload['dataset']['data_source'] = [
+                    'name'            => $ds->dataSource->name,
+                    'type'            => $ds->dataSource->type,
+                    'config'          => $this->redactSecrets($ds->dataSource->config ?? []),
+                    'config_redacted' => true, // credentials are NEVER exported — re-enter them after import
+                ];
+            }
+        }
+
+        if ($report->templates->isNotEmpty()) {
+            $payload['templates'] = $report->templates->map(function (Template $t) use (&$scanText) {
+                $scanText .= ' ' . $t->header . ' ' . $t->body . ' ' . $t->footer . ' ' . $t->page_header . ' ' . $t->page_footer . ' ' . $t->parameter_screen;
+
+                return [
+                    'name'             => $t->name,
+                    'description'      => $t->description,
+                    'header'           => $t->header,
+                    'body'             => $t->body,
+                    'footer'           => $t->footer,
+                    'page_header'      => $t->page_header,
+                    'page_footer'      => $t->page_footer,
+                    'parameter_screen' => $t->parameter_screen,
+                    'groups'           => $t->groups ?? [],
+                    'meta'             => $t->meta ?? [],
+                ];
+            })->values()->all();
+        }
+
+        $tokens = $this->scanConstantTokens($scanText);
+        if ($tokens) {
+            $query = Constant::query()->where(function ($q) use ($tokens) {
+                foreach ($tokens as $t) {
+                    $q->orWhere(fn ($qq) => $qq->where('scope', $t['scope'])->where('key', $t['key']));
+                }
+            });
+            if ($report->project_id) {
+                $query->where(fn ($q) => $q->where('scope', '!=', 'project')->orWhere('project_id', $report->project_id));
+            } else {
+                $query->where('scope', '!=', 'project');
+            }
+            $payload['constants'] = $query->get()->map(fn (Constant $c) => [
+                'scope'       => $c->scope,
+                'type'        => $c->type,
+                'key'         => $c->key,
+                'label'       => $c->label,
+                'value'       => $c->value,
+                'format'      => $c->format,
+                'formula'     => $c->formula,
+                'data_column' => $c->data_column,
+            ])->values()->all();
+        }
 
         $filename = \Illuminate\Support\Str::slug($report->name) . '.json';
 
@@ -152,11 +234,45 @@ class ReportController extends Controller
             ->header('Content-Disposition', "attachment; filename=\"{$filename}\"");
     }
 
-    // Create a new report from a previously-exported JSON payload.
+    // Never let a data source's connection secrets leave the server in an
+    // export file — replace common credential keys with a placeholder so the
+    // importer knows to re-enter them, while keeping harmless structural info
+    // (host, port, database name, etc) so reconnecting is still easy.
+    private function redactSecrets(array $config): array
+    {
+        $secretKeys = ['password', 'pass', 'secret', 'api_key', 'apikey', 'token', 'access_token', 'client_secret'];
+        foreach ($config as $key => $value) {
+            if (in_array(strtolower((string) $key), $secretKeys, true)) {
+                $config[$key] = null;
+            }
+        }
+
+        return $config;
+    }
+
+    // Find every {{SCOPE:KEY}} token referenced in the given text (report
+    // definition JSON, template bodies, dataset query/body) so the exported
+    // bundle can include exactly the constants this report actually needs.
+    private function scanConstantTokens(string $text): array
+    {
+        preg_match_all('/\{\{(SYSTEM|GLOBAL|PROJECT):([A-Z0-9_]+)\}\}/', $text, $m, PREG_SET_ORDER);
+        $tokens = [];
+        foreach ($m as $match) {
+            $tokens[] = ['scope' => strtolower($match[1]), 'key' => $match[2]];
+        }
+
+        return collect($tokens)->unique(fn ($t) => $t['scope'] . ':' . $t['key'])->values()->all();
+    }
+
+    // Create a new report from a previously-exported JSON bundle — recreates
+    // (or reuses, matched by name) the dataset/data source, templates, and
+    // constants it depends on, so the report is immediately usable on this
+    // environment (data source credentials still need to be re-entered — see
+    // export()'s redactSecrets()).
     public function import(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'file'            => 'nullable|file|mimes:json,txt|max:2048',
+            'file'            => 'nullable|file|mimes:json,txt|max:5120',
             'payload'         => 'nullable|array',
             'payload.name'    => 'required_with:payload|string|max:160',
             'project_id'      => 'nullable|integer|exists:projects,id',
@@ -175,25 +291,111 @@ class ReportController extends Controller
             return $this->sendError(422, 'INVALID_PAYLOAD', 'Provide a file or payload with at least a "name".');
         }
 
-        $report = Report::create([
-            'project_id'  => $data['project_id'] ?? null,
-            'name'        => $decoded['name'],
-            'description' => $decoded['description'] ?? null,
-            'type'        => in_array($decoded['type'] ?? null, Report::TYPES, true) ? $decoded['type'] : 'table',
-            'definition'  => $decoded['definition'] ?? $this->blankDefinition($decoded['type'] ?? 'table'),
-            'status'      => Report::STATUS_DRAFT,
-            'created_by'  => $request->user()->id,
-        ]);
-        $this->audit->log('report.imported', Report::class, $report->id);
+        $userId = $request->user()->id;
+        $projectId = $data['project_id'] ?? null;
+        $notes = [];
 
-        return $this->sendCreated($this->row($report->fresh(['project', 'dataset'])));
+        // Constants: create any that don't already exist here (matched by scope+key,
+        // and project_id for project-scoped ones).
+        foreach ($decoded['constants'] ?? [] as $c) {
+            $scope = in_array($c['scope'] ?? null, [Constant::SCOPE_SYSTEM, Constant::SCOPE_GLOBAL, Constant::SCOPE_PROJECT], true) ? $c['scope'] : Constant::SCOPE_GLOBAL;
+            $exists = Constant::where('scope', $scope)->where('key', $c['key'])
+                ->when($scope === Constant::SCOPE_PROJECT, fn ($q) => $q->where('project_id', $projectId))
+                ->exists();
+            if (! $exists && ! empty($c['key'])) {
+                Constant::create([
+                    'scope' => $scope, 'type' => $c['type'] ?? Constant::TYPE_TEXT,
+                    'project_id' => $scope === Constant::SCOPE_PROJECT ? $projectId : null,
+                    'key' => $c['key'], 'label' => $c['label'] ?? $c['key'], 'value' => $c['value'] ?? null,
+                    'format' => $c['format'] ?? null, 'formula' => $c['formula'] ?? null,
+                    'data_column' => $c['data_column'] ?? null, 'created_by' => $userId,
+                ]);
+                $notes[] = 'Created constant {{' . strtoupper($scope) . ':' . $c['key'] . '}}';
+            }
+        }
+
+        // Dataset + data source: reuse an existing data source by name if one
+        // exists, else create it (with redacted credentials the user must fill in).
+        $datasetId = null;
+        if ($ds = $decoded['dataset'] ?? null) {
+            $dataSourceId = null;
+            if ($src = $ds['data_source'] ?? null) {
+                $existingSrc = DataSource::where('name', $src['name'])->first();
+                if ($existingSrc) {
+                    $dataSourceId = $existingSrc->id;
+                } else {
+                    $newSrc = DataSource::create([
+                        'project_id' => $projectId, 'name' => $src['name'], 'type' => $src['type'],
+                        'config' => $src['config'] ?? [], 'status' => 'active', 'created_by' => $userId,
+                    ]);
+                    $dataSourceId = $newSrc->id;
+                    $notes[] = "Created data source \"{$src['name']}\" — re-enter its connection credentials before using it.";
+                }
+            }
+            $existingDataset = $dataSourceId
+                ? Dataset::where('data_source_id', $dataSourceId)->where('name', $ds['name'])->first()
+                : null;
+            if ($existingDataset) {
+                $datasetId = $existingDataset->id;
+            } elseif ($dataSourceId) {
+                $newDataset = Dataset::create([
+                    'data_source_id' => $dataSourceId, 'name' => $ds['name'], 'description' => $ds['description'] ?? null,
+                    'query' => $ds['query'] ?? null, 'method' => $ds['method'] ?? null, 'body' => $ds['body'] ?? null,
+                    'fields' => $ds['fields'] ?? [], 'parameters' => $ds['parameters'] ?? [], 'created_by' => $userId,
+                ]);
+                $datasetId = $newDataset->id;
+                $notes[] = "Created dataset \"{$ds['name']}\"";
+            }
+        }
+
+        $report = Report::create([
+            'project_id'      => $projectId,
+            'dataset_id'      => $datasetId,
+            'name'            => $decoded['name'],
+            'description'     => $decoded['description'] ?? null,
+            'type'            => in_array($decoded['type'] ?? null, Report::TYPES, true) ? $decoded['type'] : 'table',
+            'definition'      => $decoded['definition'] ?? $this->blankDefinition($decoded['type'] ?? 'table'),
+            'layout'          => $decoded['layout'] ?? 'portrait',
+            'printout_size'   => $decoded['printout_size'] ?? 'a4',
+            'printout_width'  => $decoded['printout_width'] ?? null,
+            'printout_height' => $decoded['printout_height'] ?? null,
+            'output_formats'  => $decoded['output_formats'] ?? [],
+            'status'          => Report::STATUS_DRAFT,
+            'created_by'      => $userId,
+        ]);
+
+        // Templates: reuse by name if one already exists, else create + attach.
+        $templateIds = [];
+        foreach ($decoded['templates'] ?? [] as $t) {
+            $existing = Template::where('name', $t['name'])->first();
+            if ($existing) {
+                $templateIds[] = $existing->id;
+                continue;
+            }
+            $newTemplate = Template::create([
+                'name' => $t['name'], 'description' => $t['description'] ?? null, 'project_id' => $projectId,
+                'header' => $t['header'] ?? null, 'body' => $t['body'] ?? null, 'footer' => $t['footer'] ?? null,
+                'page_header' => $t['page_header'] ?? null, 'page_footer' => $t['page_footer'] ?? null,
+                'parameter_screen' => $t['parameter_screen'] ?? null, 'groups' => $t['groups'] ?? [],
+                'meta' => $t['meta'] ?? [], 'created_by' => $userId,
+            ]);
+            $templateIds[] = $newTemplate->id;
+            $notes[] = "Created template \"{$t['name']}\"";
+        }
+        if ($templateIds) {
+            $report->templates()->sync($templateIds);
+        }
+
+        $this->audit->log('report.imported', Report::class, $report->id, null, ['notes' => $notes]);
+
+        return $this->sendCreated($this->row($report->fresh(['project', 'dataset', 'templates']), true) + ['import_notes' => $notes]);
     }
 
     public function show(Request $request, Report $report): JsonResponse
     {
         $this->authorizeReport($request, $report, 'view');
 
-        return $this->sendOk($this->row($report->load(['project:id,code,name', 'dataset:id,name', 'roles:id,slug,name', 'templates:id,name']), true));
+        return $this->sendOk($this->row($report->load(['project:id,code,name', 'dataset:id,name,data_source_id', 'roles:id,slug,name', 'templates:id,name']), true));
     }
 
     // Preview with sample/placeholder data derived from the dataset's declared
@@ -235,19 +437,97 @@ class ReportController extends Controller
         if ($report->locked) {
             return $this->sendError(423, 'REPORT_LOCKED', 'This report is locked. Unlock it first.');
         }
-        $data = $request->validate(['prompt' => 'required|string|max:2000']);
+        $data = $request->validate([
+            'prompt' => 'required|string|max:2000',
+            'file'   => 'nullable|file|max:10240|mimes:jpg,jpeg,png,webp,pdf,txt,md,csv',
+        ]);
 
         $model = $resolver->model('generation');
-        $system = 'You edit a report definition JSON for a reporting tool. The definition has keys: '
-            . 'type (one of table/grouped/kpi/matrix/chart/document), columns (array of {field,label}), '
-            . 'groups (array), aggregates (array), filters (array), sorts (array), conditional (array). '
-            . 'You will be given the CURRENT definition JSON and an instruction. '
-            . 'Return ONLY the complete, updated definition as valid JSON — no markdown fences, no explanation.';
+        $system = <<<'SYSTEM'
+You edit a report definition JSON for a reporting tool. The renderer ONLY understands these keys — do
+not invent other keys, they will be silently ignored:
+
+- type: one of table | grouped | kpi | matrix | chart | document
+- columns: array of {field, label, format, align, value_map, calc}.
+    - field: the dataset column name this report column reads from (or, for a calculated column, a NEW
+      unique name you invent — see "calc" below).
+    - label: the column header text shown to the user.
+    - format: one of:
+        text
+        number       — trims trailing zeros, e.g. 40.80 -> "40.8", 420.00 -> "420"
+        number_fixed — ALWAYS exactly 2 decimals with a thousands separator, e.g. "9,999.99" or "420.00".
+                       Use this whenever the instruction gives a fixed-decimal example like "9,999.99",
+                       or says "2 decimal places" / "always show cents".
+        currency     — same as number_fixed but prefixed "RM ", e.g. "RM 9,999.99"
+        percent      — 1 decimal place with a % sign
+        date (yyyy-mm-dd) | date_dmy (dd/mm/yyyy) | date_mdy (mm/dd/yyyy) | datetime | datetime_dmy
+      A request like "change X to dd/mm/yyyy" or "format X as 9,999.99" means: find the column whose
+      field matches X in the CURRENT columns array, and change ONLY that column's "format" — do not touch
+      any other column.
+    - align: one of left | right | center — column text alignment. "Right justify" / "align right" means
+      set this to "right" (numbers are commonly right-aligned).
+    - value_map: an object mapping the RAW stored value (as a string) to a display label — this is how
+      you turn a raw code into a human label, e.g. status "0" meaning "Active" and anything else meaning
+      "Inactive": {"0":"Active","*":"Inactive"} ("*" is the fallback for any value not explicitly listed).
+      Use value_map whenever the instruction describes turning a raw value into a different label/word
+      based on its value (active/inactive, yes/no, status codes, etc) — this is NOT a "format", it's a
+      value_map.
+    - calc: a simple arithmetic expression string over OTHER existing field names, e.g. "qty * price" or
+      "(price - discount) * qty". Supports + - * / and parentheses only (no functions). Use this when the
+      instruction asks to add a computed/total column derived from other columns. When adding a calc
+      column, invent a new "field" name for it (e.g. "total_amount") and give it a clear "label". A calc
+      expression may ALSO reference a stored constant with {{GLOBAL:KEY}} / {{SYSTEM:KEY}} /
+      {{PROJECT:KEY}} (uppercase key) instead of a hardcoded number — e.g. "jumlah_bayaran * {{GLOBAL:SST}}"
+      for "SST = jumlah_bayaran times the SST constant". Use this whenever the instruction names a
+      constant/setting by name rather than giving a literal number.
+  Adding a brand-new column (plain or calc), or removing one, is fine — see the CRITICAL RULE below for
+  what "editing" a column vs "adding" one means for the REST of the columns array.
+- groups: array of {field} — for type=grouped, groups rows by the first entry's field, with subtotals.
+- aggregates: array of {field, fn, label} — fn is one of sum|avg|min|max|count. Used for KPI cards and
+  group/grand totals.
+- filters, sorts: array, kept as-is unless the instruction asks to change them.
+- striped: boolean — true alternates row background colors (zebra striping). This is what "different
+  row colors" / "alternate row white and gray" means.
+- show_row_number: boolean — true adds a leading "#" column numbering each row 1, 2, 3, ... This is
+  what "add numbering" / "row number column" means.
+- conditional: array of rules, each: {field, op, value, style: {color, background}}. op is one of
+  = | != | > | < | >= | <=. color/background are each one of red|green|amber|gray — this is how you
+  color a column's text or cell background based on that row's value (e.g. "make font red when type is
+  Commercial" -> {"field":"type","op":"=","value":"Commercial","style":{"color":"red"}}).
+
+CRITICAL RULE — you are EDITING, not rewriting: every field present in the CURRENT definition's
+"columns" array MUST still be present in your output, in the same order, UNLESS the instruction
+explicitly says to remove one. If the instruction only asks to change formatting, value labels
+(value_map), coloring, sorting, striping, numbering, or add ONE new/calculated column, then every other
+column must be copied over unchanged — never drop, shorten, or regenerate the columns list from scratch
+just because one column changed. Adding a new column means APPENDING to the existing list, not replacing
+it. The same "only touch what's asked" rule applies to every other key: copy everything else
+byte-for-byte from the current definition.
+
+You will be given the CURRENT definition JSON and an instruction describing a change. The instruction
+may be accompanied by an attached image (e.g. a screenshot/mockup of how the report should look) or an
+attached document's extracted text (e.g. a spec describing the columns/layout needed) — read it and
+incorporate what it shows/describes into the definition you produce, same as if it were written in the
+instruction itself. Return ONLY the complete, updated definition as valid JSON — no markdown fences, no
+explanation, no extra keys beyond the ones listed above (plus whatever untouched keys were already
+present in the current definition).
+SYSTEM;
+
+        $genOptions = ['system' => $system, 'temperature' => 0.2];
+        $attachmentNote = '';
+        if ($request->hasFile('file')) {
+            try {
+                [$genOptions, $attachmentNote] = $this->attachFileToPrompt($request->file('file'), $genOptions);
+            } catch (\Throwable $e) {
+                return $this->sendError(422, 'FILE_UNREADABLE', 'Could not read the attached file: ' . $e->getMessage());
+            }
+        }
+
         $userMessage = "Current definition:\n" . json_encode($report->definition ?? [], JSON_PRETTY_PRINT)
-            . "\n\nInstruction: {$data['prompt']}";
+            . "\n\nInstruction: {$data['prompt']}" . $attachmentNote;
 
         try {
-            $raw = $ai->generate($model, $userMessage, ['system' => $system, 'temperature' => 0.2]);
+            $raw = $ai->generate($model, $userMessage, $genOptions);
         } catch (\Throwable $e) {
             return $this->sendError(503, 'AI_UNAVAILABLE', 'Could not reach the AI provider: ' . $e->getMessage());
         }
@@ -262,15 +542,77 @@ class ReportController extends Controller
         // report-level fields it was never asked about, and record the
         // instruction that produced this version.
         $existing = (array) ($report->definition ?? []);
+        $decoded['columns'] = $this->guardColumns($existing['columns'] ?? [], $decoded['columns'] ?? [], $data['prompt']);
         $decoded['prompt'] = $data['prompt'];
         $decoded['fixed_parameters_enabled'] = $existing['fixed_parameters_enabled'] ?? [];
         $decoded['custom_parameters'] = $existing['custom_parameters'] ?? [];
+        $promptHistory = (array) ($existing['prompt_history'] ?? []);
+        $promptHistory[] = ['text' => $data['prompt'], 'at' => now()->toIso8601String()];
+        $decoded['prompt_history'] = $promptHistory;
 
-        $report->update(['definition' => $decoded]);
+        $report->update(['definition' => $decoded, 'version' => $report->version + 1]);
         $this->audit->log('report.ai_generated', Report::class, $report->id, null, ['prompt' => $data['prompt']]);
         $this->saveHistory($report, $request->user()->id, 'ai_generated', $data['prompt']);
 
         return $this->sendOk(['definition' => $decoded, 'report' => $this->row($report->fresh(), true)]);
+    }
+
+    // Safety net against the AI silently dropping unrelated columns when asked
+    // for an unrelated change (e.g. "format the date column as dd/mm/yyyy"
+    // sometimes regenerates the whole columns array from scratch instead of
+    // editing just that one field). Unless the instruction clearly asks to
+    // remove/hide a column, any column present before but missing from the AI's
+    // response is restored (keeping the AI's edits to columns it DID keep).
+    // Turn an uploaded prompt attachment into either a vision "image" generate()
+    // option (jpg/png/webp) or extracted text appended to the prompt (pdf via
+    // smalot/pdfparser; txt/md/csv read as-is).
+    private function attachFileToPrompt(\Illuminate\Http\UploadedFile $file, array $genOptions): array
+    {
+        $mime = (string) $file->getMimeType();
+
+        if (str_starts_with($mime, 'image/')) {
+            $genOptions['image'] = [
+                'data' => base64_encode(file_get_contents($file->getRealPath())),
+                'mime' => $mime,
+            ];
+
+            return [$genOptions, "\n\n(An image is attached — use it as the visual reference for this change.)"];
+        }
+
+        if ($mime === 'application/pdf') {
+            $text = (new \Smalot\PdfParser\Parser())->parseFile($file->getRealPath())->getText();
+
+            return [$genOptions, "\n\nAttached document content:\n" . mb_substr(trim($text), 0, 8000)];
+        }
+
+        // txt / md / csv
+        return [$genOptions, "\n\nAttached document content:\n" . mb_substr(trim((string) file_get_contents($file->getRealPath())), 0, 8000)];
+    }
+
+    private function guardColumns(array $existingColumns, array $newColumns, string $prompt): array
+    {
+        if (! $existingColumns) {
+            return $newColumns;
+        }
+        $removalWords = ['remove', 'delete', 'drop', 'hilang', 'buang', 'keluar', 'padam'];
+        $promptLower = strtolower($prompt);
+        foreach ($removalWords as $word) {
+            if (str_contains($promptLower, $word)) {
+                return $newColumns; // instruction plausibly intends to remove something — trust the AI
+            }
+        }
+
+        $byField = collect($newColumns)->filter(fn ($c) => ! empty($c['field']))->keyBy('field');
+        $existingFields = collect($existingColumns)->pluck('field')->filter()->all();
+
+        // Preserve every pre-existing column (using the AI's edited version where it
+        // touched one), then append any genuinely NEW columns the AI added (e.g. a
+        // calculated column) that weren't there before — those are legitimate
+        // additions, not something to guard against.
+        $kept = collect($existingColumns)->map(fn ($c) => $byField->get($c['field'] ?? null, $c));
+        $added = collect($newColumns)->filter(fn ($c) => ! empty($c['field']) && ! in_array($c['field'], $existingFields, true));
+
+        return $kept->concat($added)->values()->all();
     }
 
     // AI models frequently wrap JSON in markdown fences or add stray prose even
@@ -358,7 +700,7 @@ class ReportController extends Controller
             return $this->sendError(423, 'REPORT_LOCKED', 'This report is locked. Unlock it first.');
         }
         $data = $this->validateReport($request, $report);
-        $report->update(collect($data)->except(['permissions', 'templates'])->all());
+        $report->update(collect($data)->except(['permissions', 'templates'])->all() + ['version' => $report->version + 1]);
         if (array_key_exists('permissions', $data)) {
             $report->syncPermissions($data['permissions'] ?? []);
         }
@@ -391,13 +733,39 @@ class ReportController extends Controller
             ->limit(50)
             ->get(['h.id', 'h.action', 'h.snapshot', 'h.created_at', 'u.name as changed_by_name']);
 
-        return $this->sendOk($rows->map(fn ($r) => [
-            'id'              => $r->id,
-            'action'          => $r->action,
-            'snapshot'        => json_decode($r->snapshot, true),
-            'changed_by_name' => $r->changed_by_name,
-            'created_at'      => $r->created_at,
-        ]));
+        return $this->sendOk($rows->map(function ($r) {
+            $snapshot = json_decode($r->snapshot, true);
+            // DB::table() (unlike Eloquent) returns raw "Y-m-d H:i:s" strings with no
+            // timezone marker — the frontend's `new Date(...)` then misreads it as
+            // local time instead of UTC. Force an explicit UTC ISO8601 string.
+            $createdAt = \Carbon\Carbon::parse($r->created_at, 'UTC')->toIso8601String();
+
+            return [
+                'id'              => $r->id,
+                'action'          => $r->action,
+                'snapshot'        => $snapshot,
+                'version_label'   => $this->versionLabel((int) ($snapshot['version'] ?? 0), $r->created_at),
+                'changed_by_name' => $r->changed_by_name,
+                'created_at'      => $createdAt,
+            ];
+        }));
+    }
+
+    // Bulk or full history wipe (reports.edit) — `ids` in the body deletes just
+    // those rows, omitting it clears everything for this report.
+    public function clearHistory(Request $request, Report $report): JsonResponse
+    {
+        $this->authorizeReport($request, $report, 'edit');
+        $data = $request->validate(['ids' => 'nullable|array', 'ids.*' => 'integer']);
+
+        $query = DB::table('report_histories')->where('report_id', $report->id);
+        if (! empty($data['ids'])) {
+            $query->whereIn('id', $data['ids']);
+        }
+        $deleted = $query->delete();
+        $this->audit->log('report.history_cleared', Report::class, $report->id, null, ['deleted' => $deleted]);
+
+        return $this->sendOk(['deleted' => $deleted]);
     }
 
     public function logs(Request $request, Report $report): JsonResponse
@@ -406,18 +774,18 @@ class ReportController extends Controller
 
         $rows = DB::table('audit_logs as a')
             ->leftJoin('users as u', 'u.id', '=', 'a.user_id')
-            ->where('a.subject_type', Report::class)
-            ->where('a.subject_id', $report->id)
+            ->where('a.object_type', Report::class)
+            ->where('a.object_id', (string) $report->id)
             ->orderByDesc('a.created_at')
             ->limit(100)
-            ->get(['a.id', 'a.event', 'a.properties', 'a.created_at', 'u.name as user_name']);
+            ->get(['a.id', 'a.action', 'a.new_values', 'a.created_at', 'u.name as user_name']);
 
         return $this->sendOk($rows->map(fn ($r) => [
             'id'         => $r->id,
-            'event'      => $r->event,
-            'properties' => json_decode($r->properties ?? '{}', true),
+            'event'      => $r->action,
+            'properties' => json_decode($r->new_values ?? '{}', true),
             'user_name'  => $r->user_name ?? 'System',
-            'created_at' => $r->created_at,
+            'created_at' => \Carbon\Carbon::parse($r->created_at, 'UTC')->toIso8601String(),
         ]));
     }
 
@@ -440,6 +808,8 @@ class ReportController extends Controller
             'project_id'      => 'nullable|integer|exists:projects,id',
             'dataset_id'      => 'nullable|integer|exists:datasets,id',
             'status'          => ['nullable', Rule::in([Report::STATUS_DRAFT, Report::STATUS_PUBLISHED])],
+            'tags'            => 'nullable|array',
+            'tags.*'          => 'string|max:40',
             'layout'          => ['nullable', Rule::in(Report::LAYOUTS)],
             'printout_size'   => ['nullable', Rule::in(Report::PRINTOUT_SIZES)],
             'printout_width'  => 'nullable|integer|min:1|max:5000',
@@ -453,21 +823,36 @@ class ReportController extends Controller
             'definition.type'        => ['nullable', Rule::in(Report::TYPES)],
             'definition.columns'     => 'nullable|array',
             'definition.columns.*.field' => 'required_with:definition.columns|string|max:120',
+            'definition.columns.*.label' => 'nullable|string|max:160',
+            'definition.columns.*.format' => 'nullable|string|max:40',
+            'definition.columns.*.value_map' => 'nullable|array',
+            'definition.columns.*.calc'  => 'nullable|string|max:500',
+            'definition.columns.*.align' => ['nullable', Rule::in(['left', 'right', 'center'])],
             'definition.groups'      => 'nullable|array',
             'definition.aggregates'  => 'nullable|array',
             'definition.filters'     => 'nullable|array',
             'definition.sorts'       => 'nullable|array',
             'definition.params'      => 'nullable|array',
             'definition.conditional' => 'nullable|array',
+            'definition.striped'     => 'nullable|boolean',
+            'definition.show_row_number' => 'nullable|boolean',
             'definition.prompt'      => 'nullable|string|max:2000',
+            'definition.prompt_history'       => 'nullable|array',
+            'definition.prompt_history.*.text' => 'nullable|string|max:2000',
+            'definition.prompt_history.*.at'   => 'nullable|string|max:40',
             // Report-level parameters (left panel > Parameters): a toggle map for the
             // dataset's fixed params, plus report-defined custom parameters.
             'definition.fixed_parameters_enabled'          => 'nullable|array',
+            'definition.template_header_id' => 'nullable|integer|exists:templates,id',
+            'definition.template_footer_id' => 'nullable|integer|exists:templates,id',
             'definition.custom_parameters'                 => 'nullable|array',
             'definition.custom_parameters.*.id'             => 'nullable|string|max:60',
             'definition.custom_parameters.*.title'          => 'required_with:definition.custom_parameters|string|max:160',
-            'definition.custom_parameters.*.type'           => ['required_with:definition.custom_parameters', Rule::in(['text', 'dropdown', 'checkbox', 'radio'])],
+            'definition.custom_parameters.*.type'           => ['required_with:definition.custom_parameters', Rule::in(['text', 'dropdown', 'checkbox', 'radio', 'date', 'datetime', 'time', 'amount'])],
             'definition.custom_parameters.*.default_value'  => 'nullable',
+            'definition.custom_parameters.*.min'            => 'nullable|numeric',
+            'definition.custom_parameters.*.max'            => 'nullable|numeric',
+            'definition.custom_parameters.*.source_type'    => ['nullable', Rule::in(['json', 'datasource'])],
             'definition.custom_parameters.*.options'        => 'nullable|array',
             'definition.custom_parameters.*.data_source_id' => 'nullable|integer|exists:data_sources,id',
             'definition.custom_parameters.*.dataset_id'     => 'nullable|integer|exists:datasets,id',
@@ -495,10 +880,20 @@ class ReportController extends Controller
                 'status'     => $report->status,
                 'definition' => $report->definition ?? [],
                 'prompt'     => $prompt,
+                'version'    => $report->version,
             ]),
             'created_at'  => now(),
             'updated_at'  => now(),
         ]);
+    }
+
+    // Version label = the date of that save + a running number that increments
+    // on every save (not per day) — e.g. 20260710.0007.
+    private function versionLabel(int $version, $date): string
+    {
+        $d = $date instanceof \Carbon\CarbonInterface ? $date : \Carbon\Carbon::parse((string) $date);
+
+        return $d->format('Ymd') . '.' . str_pad((string) $version, 4, '0', STR_PAD_LEFT);
     }
 
     private function blankDefinition(string $type): array
@@ -514,7 +909,9 @@ class ReportController extends Controller
             'description' => $r->description,
             'type'        => $r->type,
             'status'      => $r->status,
+            'tags'        => $r->tags ?? [],
             'version'     => $r->version,
+            'version_label' => $this->versionLabel($r->version, $r->updated_at ?? now()),
             'layout'      => $r->layout,
             'printout_size'   => $r->printout_size,
             'printout_width'  => $r->printout_width,
@@ -522,7 +919,7 @@ class ReportController extends Controller
             'output_formats'  => $r->output_formats ?? [],
             'locked'      => (bool) $r->locked,
             'project'     => $r->project ? ['id' => $r->project->id, 'code' => $r->project->code, 'name' => $r->project->name] : null,
-            'dataset'     => $r->dataset ? ['id' => $r->dataset->id, 'name' => $r->dataset->name] : null,
+            'dataset'     => $r->dataset ? ['id' => $r->dataset->id, 'name' => $r->dataset->name, 'data_source_id' => $r->dataset->data_source_id] : null,
             'creator'     => $r->creator ? ['id' => $r->creator->id, 'name' => $r->creator->name] : null,
             'templates'   => $r->relationLoaded('templates') ? $r->templates->map(fn ($t) => ['id' => $t->id, 'name' => $t->name])->values() : null,
             'definition'  => $withDefinition ? ($r->definition ?? []) : null,

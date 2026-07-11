@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, provide, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import * as icons from 'lucide-vue-next'
 import { adminMenu, type MenuItem } from '../config/admin-menu'
@@ -21,6 +21,11 @@ function toggleCollapsed() {
   collapsed.value = !collapsed.value
   try { localStorage.setItem('airr-sidebar-collapsed', collapsed.value ? '1' : '0') } catch { /* ignore */ }
 }
+// Exposed to child route views (e.g. ReportsView) so they can collapse the
+// sidebar themselves at a moment finer-grained than "entered this route" —
+// e.g. only once a specific report is opened, not just on landing on the list.
+provide('sidebar', { collapsed, setCollapsed: (v: boolean) => { collapsed.value = v; try { localStorage.setItem('airr-sidebar-collapsed', v ? '1' : '0') } catch { /* ignore */ } } })
+
 const autoCollapseRoutes = ref<Set<string>>(new Set())
 // Auto-minimise when navigating to an authoring item flagged auto_collapse.
 watch(() => route.name, (name) => {

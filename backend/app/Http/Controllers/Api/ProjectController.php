@@ -36,8 +36,116 @@ class ProjectController extends Controller
         if ($search = $request->input('q')) {
             $query->where(fn ($w) => $w->where('name', 'like', "%{$search}%")->orWhere('code', 'like', "%{$search}%"));
         }
+        if ($request->boolean('with_trashed')) {
+            $query->withTrashed();
+        }
+        if (! $request->boolean('include_archived')) {
+            $query->whereNull('archived_at');
+        }
 
-        return $this->sendOk($query->orderByDesc('created_at')->get()->map(fn (Project $p) => $this->row($p)));
+        $sort = $request->input('sort', '-created_at');
+        $column = ltrim($sort, '-');
+        $direction = str_starts_with($sort, '-') ? 'desc' : 'asc';
+        if (in_array($column, ['name', 'created_at', 'status'], true)) {
+            $query->orderBy($column, $direction);
+        } else {
+            $query->orderByDesc('created_at');
+        }
+
+        return $this->sendOk($query->get()->map(fn (Project $p) => $this->row($p)));
+    }
+
+    public function archive(Project $project): JsonResponse
+    {
+        $project->update(['archived_at' => now()]);
+        $this->audit->log('project.archived', Project::class, $project->id);
+
+        return $this->sendOk($this->row($project->fresh(['creator'])));
+    }
+
+    public function unarchive(Project $project): JsonResponse
+    {
+        $project->update(['archived_at' => null]);
+        $this->audit->log('project.unarchived', Project::class, $project->id);
+
+        return $this->sendOk($this->row($project->fresh(['creator'])));
+    }
+
+    // Clone a project (settings only — members/reports are NOT copied, to avoid
+    // silently duplicating access grants across projects).
+    public function duplicate(Request $request, Project $project): JsonResponse
+    {
+        $copy = Project::create([
+            'code' => $project->code . '-COPY-' . substr(md5((string) microtime(true)), 0, 4),
+            'name' => $project->name . ' (Copy)',
+            'customer_name' => $project->customer_name, 'type' => $project->type, 'color' => $project->color,
+            'status' => Project::STATUS_ACTIVE, 'description' => $project->description,
+            'tags' => $project->tags, 'created_by' => $request->user()->id,
+        ]);
+        $this->audit->log('project.duplicated', Project::class, $copy->id, null, ['from' => $project->id]);
+
+        return $this->sendCreated($this->row($copy->fresh(['creator'])));
+    }
+
+    public function export(Project $project): \Symfony\Component\HttpFoundation\Response
+    {
+        $payload = [
+            'code' => $project->code, 'name' => $project->name, 'customer_name' => $project->customer_name,
+            'type' => $project->type, 'color' => $project->color, 'description' => $project->description,
+            'tags' => $project->tags ?? [], 'exported_at' => now()->toIso8601String(),
+        ];
+        $filename = \Illuminate\Support\Str::slug($project->name) . '.json';
+
+        return response()->json($payload)->header('Content-Disposition', "attachment; filename=\"{$filename}\"");
+    }
+
+    public function import(Request $request): JsonResponse
+    {
+        $data = $request->validate(['file' => 'nullable|file|mimes:json,txt|max:2048', 'payload' => 'nullable|array']);
+        if ($request->hasFile('file')) {
+            $decoded = json_decode($request->file('file')->get(), true);
+            if (json_last_error() !== JSON_ERROR_NONE || ! is_array($decoded)) {
+                return $this->sendError(422, 'INVALID_JSON', 'The uploaded file is not valid JSON.');
+            }
+        } else {
+            $decoded = $data['payload'] ?? null;
+        }
+        if (! $decoded || empty($decoded['name']) || empty($decoded['code'])) {
+            return $this->sendError(422, 'INVALID_PAYLOAD', 'Provide a file or payload with at least "name" and "code".');
+        }
+
+        $code = $decoded['code'];
+        if (Project::where('code', $code)->exists()) {
+            $code .= '-' . substr(md5((string) microtime(true)), 0, 4);
+        }
+        $project = Project::create([
+            'code' => $code, 'name' => $decoded['name'], 'customer_name' => $decoded['customer_name'] ?? null,
+            'type' => $decoded['type'] ?? null, 'color' => $decoded['color'] ?? null,
+            'description' => $decoded['description'] ?? null, 'tags' => $decoded['tags'] ?? [],
+            'status' => Project::STATUS_ACTIVE, 'created_by' => $request->user()->id,
+        ]);
+        $this->audit->log('project.imported', Project::class, $project->id);
+
+        return $this->sendCreated($this->row($project->fresh(['creator'])));
+    }
+
+    public function logs(Project $project): JsonResponse
+    {
+        $rows = \Illuminate\Support\Facades\DB::table('audit_logs as a')
+            ->leftJoin('users as u', 'u.id', '=', 'a.user_id')
+            ->where('a.object_type', Project::class)
+            ->where('a.object_id', (string) $project->id)
+            ->orderByDesc('a.created_at')
+            ->limit(100)
+            ->get(['a.id', 'a.action', 'a.new_values', 'a.created_at', 'u.name as user_name']);
+
+        return $this->sendOk($rows->map(fn ($r) => [
+            'id'         => $r->id,
+            'event'      => $r->action,
+            'properties' => json_decode($r->new_values ?? '{}', true),
+            'user_name'  => $r->user_name ?? 'System',
+            'created_at' => \Carbon\Carbon::parse($r->created_at, 'UTC')->toIso8601String(),
+        ]));
     }
 
     public function show(Project $project): JsonResponse
@@ -67,10 +175,19 @@ class ProjectController extends Controller
 
     public function destroy(Project $project): JsonResponse
     {
-        $project->delete(); // pivots cascade
+        $project->delete(); // soft delete — pivots stay intact, restorable via restore()
         $this->audit->log('project.deleted', Project::class, $project->id);
 
         return $this->sendNoContent();
+    }
+
+    public function restore(int $id): JsonResponse
+    {
+        $project = Project::withTrashed()->findOrFail($id);
+        $project->restore();
+        $this->audit->log('project.restored', Project::class, $project->id);
+
+        return $this->sendOk($this->row($project->fresh(['creator'])));
     }
 
     private function validateProject(Request $request, ?Project $project = null): array
@@ -85,6 +202,8 @@ class ProjectController extends Controller
             'start_date'    => 'nullable|date',
             'end_date'      => 'nullable|date|after_or_equal:start_date',
             'description'   => 'nullable|string|max:2000',
+            'tags'          => 'nullable|array',
+            'tags.*'        => 'string|max:40',
             // FR-M14.5 per-project AI override (edition-gated at resolution time).
             'ai_config'                   => 'nullable|array',
             'ai_config.provider'          => 'nullable|string|max:40',
@@ -161,7 +280,10 @@ class ProjectController extends Controller
             'end_date'    => $p->end_date?->toDateString(),
             'description' => $p->description,
             'ai_config'   => $p->ai_config,
+            'tags'        => $p->tags ?? [],
+            'archived_at' => $p->archived_at?->toIso8601String(),
             'creator'     => $p->creator ? ['id' => $p->creator->id, 'name' => $p->creator->name] : null,
+            'deleted_at'  => $p->deleted_at?->toIso8601String(),
             'users_count'   => $p->users_count ?? $p->users()->count(),
             'reports_count' => $p->reports_count ?? $p->reports()->count(),
             'templates_count' => 0, // Templates module not built yet (M6)

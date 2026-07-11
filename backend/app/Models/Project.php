@@ -5,10 +5,13 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 // FR-M14: a project groups reports and scopes access. Members = direct users.
 class Project extends Model
 {
+    use SoftDeletes;
+
     const STATUS_ACTIVE = 'active';
     const STATUS_ON_HOLD = 'on_hold';
     const STATUS_COMPLETED = 'completed';
@@ -16,11 +19,11 @@ class Project extends Model
 
     const STATUSES = [self::STATUS_ACTIVE, self::STATUS_ON_HOLD, self::STATUS_COMPLETED, self::STATUS_ARCHIVED];
 
-    protected $fillable = ['code', 'name', 'customer_name', 'type', 'color', 'status', 'start_date', 'end_date', 'description', 'ai_config', 'created_by'];
+    protected $fillable = ['code', 'name', 'customer_name', 'type', 'color', 'status', 'start_date', 'end_date', 'description', 'ai_config', 'created_by', 'tags', 'archived_at'];
 
     protected function casts(): array
     {
-        return ['start_date' => 'date', 'end_date' => 'date', 'ai_config' => 'array'];
+        return ['start_date' => 'date', 'end_date' => 'date', 'ai_config' => 'array', 'tags' => 'array', 'archived_at' => 'datetime'];
     }
 
     public function users(): BelongsToMany

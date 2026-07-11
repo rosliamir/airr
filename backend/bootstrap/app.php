@@ -62,4 +62,28 @@ return Application::configure(basePath: dirname(__DIR__))
                 ], $status);
             }
         });
+
+        // An unauthenticated request without an "Accept: application/json" header (e.g. a
+        // plain browser navigation / window.open() download link) makes Laravel's default
+        // auth middleware try to redirect to a "login" route — which doesn't exist in this
+        // API-only app, so it throws RouteNotFoundException("Route [login] not defined")
+        // before the AuthenticationException handler above even runs, leaking a raw debug
+        // trace full of vendor .php paths.
+        $exceptions->render(function (\Symfony\Component\Routing\Exception\RouteNotFoundException $e, Request $request) {
+            if ($request->is('api/*') && str_contains($e->getMessage(), 'login')) {
+                return response()->json([
+                    'error' => ['code' => 'UNAUTHORIZED', 'message' => 'Not authenticated', 'details' => null],
+                ], 401);
+            }
+        });
+
+        // Final safety net — no api/* route should ever leak a raw debug trace for ANY
+        // uncaught exception, whatever its type.
+        $exceptions->render(function (\Throwable $e, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'error' => ['code' => 'SERVER_ERROR', 'message' => 'Something went wrong.', 'details' => null],
+                ], 500);
+            }
+        });
     })->create();
