@@ -437,7 +437,6 @@ class ReportRenderer
         return '<div class="airr-report space-y-3">'
             . ($headerHtml !== '' ? '<div class="airr-report-header">' . $headerHtml . '</div>' : '')
             . '<h1 class="text-lg font-bold text-slate-800">' . e($report->name) . '</h1>'
-            . ($report->description ? '<p class="text-sm text-slate-500">' . e($report->description) . '</p>' : '')
             . '<div>' . $body . '</div>'
             . ($footerHtml !== '' ? '<div class="airr-report-footer">' . $footerHtml . '</div>' : '')
             . '</div>';

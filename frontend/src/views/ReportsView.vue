@@ -1911,30 +1911,10 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
 
         <!-- Step 2: result, after Run -->
         <template v-else>
-          <div class="flex-1 flex overflow-hidden min-h-0">
-            <!-- Parameters tick-list (re-run with different values) -->
-            <aside class="w-64 shrink-0 border-r border-slate-100 overflow-y-auto p-4 space-y-3">
-              <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Parameters</p>
-              <div v-if="!(boundDataset?.parameters ?? []).length" class="text-xs text-slate-400">No runtime parameters for this dataset.</div>
-              <div v-for="p in (boundDataset?.parameters ?? [])" :key="p.name" class="flex items-center gap-2">
-                <input type="checkbox" :checked="fixedParamsEnabled[p.name] ?? true"
-                  @change="fixedParamsEnabled = { ...fixedParamsEnabled, [p.name]: !(fixedParamsEnabled[p.name] ?? true) }"
-                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
-                <div class="min-w-0 flex-1">
-                  <label class="block text-[10px] text-slate-500 mb-0.5 truncate">{{ p.label || p.name }}</label>
-                  <input v-model="runParams[p.name]"
-                    :type="p.type === 'number' ? 'number' : p.type === 'date' ? 'date' : 'text'"
-                    :disabled="!(fixedParamsEnabled[p.name] ?? true)"
-                    class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300 disabled:bg-slate-50 disabled:text-slate-300" />
-                </div>
-              </div>
-              <button @click="runPreviewModal" :disabled="previewModalBusy"
-                class="w-full mt-2 text-xs font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5 disabled:opacity-50">
-                {{ previewModalBusy ? 'Running…' : 'Re-run' }}
-              </button>
-              <p class="text-[10px] text-slate-400">Datasource: {{ selected?.dataset?.name ?? 'none' }}</p>
-            </aside>
-
+          <div class="flex-1 flex flex-col overflow-hidden min-h-0">
+            <div class="shrink-0 px-5 py-2 border-b border-slate-100">
+              <button @click="previewModalStarted = false" class="text-xs font-medium text-slate-500 hover:text-slate-700">← Back to parameters</button>
+            </div>
             <!-- Result -->
             <div class="flex-1 overflow-auto p-5 bg-slate-100">
               <p v-if="previewModalError" class="text-sm text-airr-700 bg-airr-50 rounded-lg px-3 py-2 mb-3">{{ previewModalError }}</p>
