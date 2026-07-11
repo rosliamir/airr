@@ -22,19 +22,7 @@ class ReportRenderer
         $def = $report->definition ?? [];
         $type = $def['type'] ?? $report->type ?? 'table';
         $rows = $data['rows'] ?? [];
-        $columns = $this->columns($def, $data['columns'] ?? []);
-        // A calc expression may reference {{SYSTEM:KEY}}/{{GLOBAL:KEY}}/{{PROJECT:KEY}}
-        // constants (e.g. "jumlah_bayaran * {{GLOBAL:SST}}") — resolve those tokens to
-        // their literal DB value once per column (not per row, they're row-independent).
-        $projectId = $report->project_id ?? null;
-        $user = Auth::user();
-        $columns = array_map(function ($c) use ($projectId, $user) {
-            if ($c['calc']) {
-                $c['calc'] = $this->constants->resolve($c['calc'], $projectId, $user);
-            }
-
-            return $c;
-        }, $columns);
+        $columns = $this->resolveColumns($report, $def, $data['columns'] ?? []);
 
         $body = match ($type) {
             'grouped' => $this->grouped($def, $columns, $rows),
@@ -43,6 +31,45 @@ class ReportRenderer
         };
 
         return $this->frame($report, $body);
+    }
+
+    // Column resolution shared by render() (HTML) and tabularData() (CSV/Excel
+    // export) — same value_map/calc/{{constant}} resolution both paths, so
+    // exported files always match what the on-screen preview shows.
+    private function resolveColumns(Report $report, array $def, array $datasetColumns): array
+    {
+        $columns = $this->columns($def, $datasetColumns);
+        // A calc expression may reference {{SYSTEM:KEY}}/{{GLOBAL:KEY}}/{{PROJECT:KEY}}
+        // constants (e.g. "jumlah_bayaran * {{GLOBAL:SST}}") — resolve those tokens to
+        // their literal DB value once per column (not per row, they're row-independent).
+        $projectId = $report->project_id ?? null;
+        $user = Auth::user();
+
+        return array_map(function ($c) use ($projectId, $user) {
+            if ($c['calc']) {
+                $c['calc'] = $this->constants->resolve($c['calc'], $projectId, $user);
+            }
+
+            return $c;
+        }, $columns);
+    }
+
+    // Structured {headers, rows} for CSV/Excel export — reuses the exact same
+    // column resolution + per-cell value_map/calc/format logic as the HTML
+    // preview, so an exported file always matches what's on screen.
+    /** @param array{columns:array,rows:array} $data */
+    public function tabularData(Report $report, array $data): array
+    {
+        $def = $report->definition ?? [];
+        $columns = $this->resolveColumns($report, $def, $data['columns'] ?? []);
+
+        return [
+            'headers' => array_map(fn ($c) => $c['label'], $columns),
+            'rows'    => array_map(
+                fn ($row) => array_map(fn ($c) => $this->cellValue($c, $row), $columns),
+                $data['rows'] ?? [],
+            ),
+        ];
     }
 
     // --- column resolution ---

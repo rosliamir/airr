@@ -58,6 +58,50 @@ class ReportController extends Controller
         ]);
     }
 
+    // Preview-mode export: runs the report with the given (ticked) parameters,
+    // same as run(), then streams the result as a real CSV or Excel file via
+    // PhpSpreadsheet — using the exact same column/value resolution as the HTML
+    // preview (ReportRenderer::tabularData), so the file matches what's on screen.
+    public function exportFile(Request $request, Report $report): \Symfony\Component\HttpFoundation\Response
+    {
+        $this->authorizeReport($request, $report, 'run');
+        $data = $request->validate(['format' => 'required|in:csv,excel', 'params' => 'nullable|array']);
+        $params = (array) ($data['params'] ?? []);
+
+        $tableData = ['columns' => [], 'rows' => []];
+        if ($report->dataset) {
+            try {
+                $result = $this->connector->run($report->dataset, $params);
+            } catch (\Throwable $e) {
+                return $this->sendError(503, 'DATASOURCE_UNAVAILABLE', 'Could not reach the data source: ' . $e->getMessage());
+            }
+            $tableData = ['columns' => $result['columns'] ?? [], 'rows' => $result['rows'] ?? []];
+        }
+
+        $table = $this->renderer->tabularData($report, $tableData);
+
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->fromArray($table['headers'], null, 'A1');
+        if ($table['rows']) {
+            $sheet->fromArray($table['rows'], null, 'A2');
+        }
+
+        $isCsv = $data['format'] === 'csv';
+        $writer = $isCsv
+            ? new \PhpOffice\PhpSpreadsheet\Writer\Csv($spreadsheet)
+            : new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+        $filename = \Illuminate\Support\Str::slug($report->name) . ($isCsv ? '.csv' : '.xlsx');
+
+        $this->audit->log('report.exported_file', Report::class, $report->id, null, ['format' => $data['format']]);
+
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, $filename, [
+            'Content-Type' => $isCsv ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $query = Report::query()->with(['project:id,code,name', 'dataset:id,name,data_source_id', 'creator:id,name']);
@@ -594,22 +638,33 @@ SYSTEM;
         if (! $existingColumns) {
             return $newColumns;
         }
-        $removalWords = ['remove', 'delete', 'drop', 'hilang', 'buang', 'keluar', 'padam'];
-        $promptLower = strtolower($prompt);
-        foreach ($removalWords as $word) {
-            if (str_contains($promptLower, $word)) {
-                return $newColumns; // instruction plausibly intends to remove something — trust the AI
-            }
-        }
 
         $byField = collect($newColumns)->filter(fn ($c) => ! empty($c['field']))->keyBy('field');
         $existingFields = collect($existingColumns)->pluck('field')->filter()->all();
+        $promptLower = strtolower($prompt);
 
-        // Preserve every pre-existing column (using the AI's edited version where it
-        // touched one), then append any genuinely NEW columns the AI added (e.g. a
-        // calculated column) that weren't there before — those are legitimate
-        // additions, not something to guard against.
-        $kept = collect($existingColumns)->map(fn ($c) => $byField->get($c['field'] ?? null, $c));
+        // A pre-existing column that disappeared from the AI's response is only
+        // restored if its field/label name is NOT mentioned anywhere in the prompt —
+        // i.e. it looks like an accidental drop, not something the user asked about.
+        // If the user named the field explicitly, trust the AI removed it on purpose
+        // (this is deliberately spelling/keyword-agnostic: it survives typos like
+        // "kelaur" for "keluarkan" as long as the field name itself is spelled right).
+        $kept = collect($existingColumns)->filter(function ($c) use ($byField, $promptLower) {
+            $field = $c['field'] ?? null;
+            if ($field && $byField->has($field)) {
+                return true; // AI kept it (possibly edited) — always keep
+            }
+            $mentioned = false;
+            foreach ([$field, $c['label'] ?? null] as $name) {
+                if ($name && str_contains($promptLower, strtolower((string) $name))) {
+                    $mentioned = true;
+                    break;
+                }
+            }
+
+            return ! $mentioned; // keep only if NOT named in the prompt (i.e. wasn't targeted)
+        })->map(fn ($c) => $byField->get($c['field'] ?? null, $c));
+
         $added = collect($newColumns)->filter(fn ($c) => ! empty($c['field']) && ! in_array($c['field'], $existingFields, true));
 
         return $kept->concat($added)->values()->all();

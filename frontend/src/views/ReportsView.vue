@@ -555,6 +555,95 @@ async function previewReport() {
   }
 }
 
+// ── Preview Mode popup — tick which parameters to use, run with real data,
+// then print/save/export straight from the popup. ──────────────────────────
+const showPreviewModal = ref(false)
+const previewModalHtml = ref('')
+const previewModalRowCount = ref<number | null>(null)
+const previewModalBusy = ref(false)
+const previewModalError = ref('')
+const previewModalExporting = ref<'csv' | 'excel' | null>(null)
+const previewModalStarted = ref(false) // false = show the parameter screen (Run/Cancel); true = show the result
+
+// Only send params whose checkbox is ticked (fixedParamsEnabled — the same
+// state as the Parameters panel's checkboxes, so ticking there or here is one
+// single source of truth) — previously run() sent every param regardless of
+// its checkbox, making that checkbox purely cosmetic.
+const activePreviewParams = computed(() => {
+  const out: Record<string, string> = {}
+  for (const p of boundDataset.value?.parameters ?? []) {
+    if (fixedParamsEnabled.value[p.name] ?? true) out[p.name] = runParams.value[p.name] ?? ''
+  }
+  return out
+})
+
+async function openPreviewModal() {
+  if (!selected.value) return
+  showPreviewModal.value = true
+  previewModalHtml.value = ''
+  previewModalError.value = ''
+  previewModalRowCount.value = null
+  previewModalStarted.value = false
+  // Show the parameter screen first — the report only actually runs once the
+  // user explicitly clicks Run (or Cancel to back out without running).
+}
+async function runPreviewModal() {
+  if (!selected.value) return
+  previewModalStarted.value = true
+  previewModalBusy.value = true
+  previewModalError.value = ''
+  try {
+    const res = await apiRequest<{ data: { html: string; row_count: number } }>(`/reports/${selected.value.id}/run`, {
+      method: 'POST', body: JSON.stringify({ params: activePreviewParams.value }),
+    })
+    previewModalHtml.value = res.data.html
+    previewModalRowCount.value = res.data.row_count
+  } catch (e) {
+    previewModalError.value = e instanceof ApiException ? e.error.message : 'Run failed'
+  } finally {
+    previewModalBusy.value = false
+  }
+}
+function exitPreviewModal() {
+  showPreviewModal.value = false
+}
+function printPreviewModal() {
+  const w = window.open('', '_blank')
+  if (!w) return
+  w.document.write(`<html><head><title>${selected.value?.name ?? 'Report'}</title></html><body>${previewModalHtml.value}</body></html>`)
+  w.document.close()
+  w.focus()
+  w.print()
+}
+async function exportPreviewModal(format: 'csv' | 'excel') {
+  if (!selected.value) return
+  previewModalExporting.value = format
+  try {
+    const res = await fetch(`${(import.meta as { env: { VITE_API_BASE_URL?: string } }).env.VITE_API_BASE_URL ?? ''}/api/reports/${selected.value.id}/export-file`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('airr_token') ?? ''}` },
+      body: JSON.stringify({ format, params: activePreviewParams.value }),
+    })
+    if (!res.ok) {
+      const json = await res.json().catch(() => null)
+      throw new Error(json?.error?.message ?? 'Export failed')
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${selected.value.name}.${format === 'csv' ? 'csv' : 'xlsx'}`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    previewModalError.value = e instanceof Error ? e.message : 'Export failed'
+  } finally {
+    previewModalExporting.value = null
+  }
+}
+
 // ── Publish / Lock ────────────────────────────────────────────────────────────
 async function publishReport() {
   if (!selected.value) return
@@ -805,6 +894,9 @@ function saveParam() {
 }
 function deleteParam(id: string) {
   customParams.value = customParams.value.filter(p => p.id !== id)
+}
+function toggleCustomParamEnabled(id: string) {
+  customParams.value = customParams.value.map(p => p.id === id ? { ...p, enabled: !p.enabled } : p)
 }
 const datasetColumnsForParam = computed(() => {
   const ds = allDatasets.value.find(d => d.id === paramForm.value.dataset_id)
@@ -1241,13 +1333,14 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
                   </div>
                   <div v-if="!customParams.length" class="text-xs text-slate-400">No custom parameters.</div>
                   <div v-else class="space-y-1">
-                    <div v-for="p in customParams" :key="p.id" class="flex items-center justify-between gap-2 text-xs border border-slate-100 rounded-lg px-2 py-1.5">
-                      <div class="min-w-0">
+                    <div v-for="p in customParams" :key="p.id" class="text-xs border border-slate-100 rounded-lg px-2 py-1.5 space-y-1">
+                      <label class="flex items-center gap-1.5 min-w-0 cursor-pointer">
+                        <input type="checkbox" :checked="p.enabled" @change="toggleCustomParamEnabled(p.id)" :disabled="selected.locked"
+                          class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
                         <span class="text-slate-600 truncate">{{ p.title }}</span>
-                        <span class="text-[10px] text-slate-400 ml-1">({{ p.type }})</span>
-                        <span v-if="!p.enabled" class="text-[10px] text-slate-300 ml-1">disabled</span>
-                      </div>
-                      <div v-if="!selected.locked" class="flex items-center gap-2 shrink-0">
+                        <span class="text-[10px] text-slate-400 shrink-0">({{ p.type }})</span>
+                      </label>
+                      <div v-if="!selected.locked" class="flex items-center gap-3 justify-end">
                         <button @click="openEditParam(p)" class="text-airr-600 hover:underline">Edit</button>
                         <button @click="deleteParam(p.id)" class="text-rose-500 hover:underline">Delete</button>
                       </div>
@@ -1285,7 +1378,7 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
                   class="text-xs font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5 disabled:opacity-50">
                   {{ busy ? '…' : 'Run' }}
                 </button>
-                <button v-if="canRun" @click="previewReport" :disabled="busy"
+                <button v-if="canRun" @click="openPreviewModal" :disabled="busy"
                   class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5 disabled:opacity-50">
                   Preview
                 </button>
@@ -1734,6 +1827,98 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
             Save
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- Preview Mode popup -->
+    <div v-if="showPreviewModal" class="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 px-4 py-6" @click.self="exitPreviewModal">
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl h-full max-h-[90vh] flex flex-col">
+        <!-- Header -->
+        <div class="shrink-0 flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <h3 class="font-bold text-lg">Preview — {{ selected?.name }}</h3>
+          <button @click="exitPreviewModal" class="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+        </div>
+
+        <!-- Step 1: parameter screen — nothing runs until Run is clicked -->
+        <div v-if="!previewModalStarted" class="flex-1 overflow-y-auto p-6 flex items-start justify-center">
+          <div class="w-full max-w-md space-y-3">
+            <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Parameters</p>
+            <p class="text-[10px] text-slate-400 mb-1">Tick a parameter to include it when running — untick to ignore its value.</p>
+            <div v-if="!(boundDataset?.parameters ?? []).length" class="text-xs text-slate-400">No runtime parameters for this dataset — just click Run.</div>
+            <div v-for="p in (boundDataset?.parameters ?? [])" :key="p.name" class="flex items-center gap-2">
+              <input type="checkbox" :checked="fixedParamsEnabled[p.name] ?? true"
+                @change="fixedParamsEnabled = { ...fixedParamsEnabled, [p.name]: !(fixedParamsEnabled[p.name] ?? true) }"
+                class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
+              <div class="min-w-0 flex-1">
+                <label class="block text-[10px] text-slate-500 mb-0.5 truncate">{{ p.label || p.name }}</label>
+                <input v-model="runParams[p.name]"
+                  :type="p.type === 'number' ? 'number' : p.type === 'date' ? 'date' : 'text'"
+                  :disabled="!(fixedParamsEnabled[p.name] ?? true)"
+                  class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300 disabled:bg-slate-50 disabled:text-slate-300" />
+              </div>
+            </div>
+            <p class="text-[10px] text-slate-400 pt-1">Datasource: {{ selected?.dataset?.name ?? 'none' }}</p>
+            <p v-if="previewModalError" class="text-sm text-airr-700 bg-airr-50 rounded-lg px-3 py-2">{{ previewModalError }}</p>
+            <div class="flex justify-end gap-2 pt-2">
+              <button @click="exitPreviewModal" class="text-sm text-slate-500 px-3 py-2">Cancel</button>
+              <button @click="runPreviewModal" :disabled="previewModalBusy"
+                class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-4 py-2 disabled:opacity-50">
+                {{ previewModalBusy ? 'Running…' : 'Run' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2: result, after Run -->
+        <template v-else>
+          <div class="flex-1 flex overflow-hidden min-h-0">
+            <!-- Parameters tick-list (re-run with different values) -->
+            <aside class="w-64 shrink-0 border-r border-slate-100 overflow-y-auto p-4 space-y-3">
+              <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Parameters</p>
+              <div v-if="!(boundDataset?.parameters ?? []).length" class="text-xs text-slate-400">No runtime parameters for this dataset.</div>
+              <div v-for="p in (boundDataset?.parameters ?? [])" :key="p.name" class="flex items-center gap-2">
+                <input type="checkbox" :checked="fixedParamsEnabled[p.name] ?? true"
+                  @change="fixedParamsEnabled = { ...fixedParamsEnabled, [p.name]: !(fixedParamsEnabled[p.name] ?? true) }"
+                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
+                <div class="min-w-0 flex-1">
+                  <label class="block text-[10px] text-slate-500 mb-0.5 truncate">{{ p.label || p.name }}</label>
+                  <input v-model="runParams[p.name]"
+                    :type="p.type === 'number' ? 'number' : p.type === 'date' ? 'date' : 'text'"
+                    :disabled="!(fixedParamsEnabled[p.name] ?? true)"
+                    class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300 disabled:bg-slate-50 disabled:text-slate-300" />
+                </div>
+              </div>
+              <button @click="runPreviewModal" :disabled="previewModalBusy"
+                class="w-full mt-2 text-xs font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5 disabled:opacity-50">
+                {{ previewModalBusy ? 'Running…' : 'Re-run' }}
+              </button>
+              <p class="text-[10px] text-slate-400">Datasource: {{ selected?.dataset?.name ?? 'none' }}</p>
+            </aside>
+
+            <!-- Result -->
+            <div class="flex-1 overflow-auto p-5 bg-slate-50">
+              <p v-if="previewModalError" class="text-sm text-airr-700 bg-airr-50 rounded-lg px-3 py-2 mb-3">{{ previewModalError }}</p>
+              <div v-if="previewModalBusy" class="text-slate-400 text-sm">Running…</div>
+              <div v-else-if="previewModalHtml" class="bg-white rounded-xl border border-slate-100 p-5 shadow-sm">
+                <div v-html="previewModalHtml"></div>
+              </div>
+              <div v-else class="text-slate-400 text-sm">No output yet.</div>
+            </div>
+          </div>
+
+          <!-- Footer actions -->
+          <div class="shrink-0 flex items-center justify-between px-5 py-3 border-t border-slate-100">
+            <span class="text-xs text-slate-400" v-if="previewModalRowCount !== null">{{ previewModalRowCount }} rows</span>
+            <span v-else></span>
+            <div class="flex items-center gap-2">
+              <button @click="printPreviewModal" :disabled="!previewModalHtml" title="Opens the print dialog — choose 'Save as PDF' there for a PDF file" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5 disabled:opacity-40">Print / PDF</button>
+              <button @click="exportPreviewModal('csv')" :disabled="previewModalExporting !== null" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5 disabled:opacity-40">{{ previewModalExporting === 'csv' ? 'Exporting…' : 'Export CSV' }}</button>
+              <button @click="exportPreviewModal('excel')" :disabled="previewModalExporting !== null" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5 disabled:opacity-40">{{ previewModalExporting === 'excel' ? 'Exporting…' : 'Export Excel' }}</button>
+              <button v-if="canEdit" @click="save" :disabled="busy || selected?.locked" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5 disabled:opacity-50">{{ busy ? 'Saving…' : 'Save' }}</button>
+              <button @click="exitPreviewModal" class="text-xs font-medium text-white bg-slate-700 hover:bg-slate-800 rounded-lg px-3 py-1.5">Exit</button>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
 

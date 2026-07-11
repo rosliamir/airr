@@ -156,6 +156,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::post('reports/{report}/run', [ReportController::class, 'run'])->middleware('permission:reports.run');
     Route::post('reports/{report}/preview', [ReportController::class, 'preview'])->middleware('permission:reports.run');
+    Route::post('reports/{report}/export-file', [ReportController::class, 'exportFile'])->middleware('permission:reports.run');
     Route::middleware('permission:reports.create')->group(function () {
         Route::post('reports', [ReportController::class, 'store']);
         Route::post('reports/import', [ReportController::class, 'import']);
