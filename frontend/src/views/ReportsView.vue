@@ -567,6 +567,7 @@ const previewModalBusy = ref(false)
 const previewModalError = ref('')
 const previewModalExporting = ref<'csv' | 'excel' | null>(null)
 const previewModalStarted = ref(false) // false = show the parameter screen (Run/Cancel); true = show the result
+const previewModalMaximized = ref(false)
 
 // Only send params whose checkbox is ticked (fixedParamsEnabled — the same
 // state as the Parameters panel's checkboxes, so ticking there or here is one
@@ -589,9 +590,11 @@ async function openPreviewModal() {
   previewModalStarted.value = false
   // Show the parameter screen first — the report only actually runs once the
   // user explicitly clicks Run (or Cancel to back out without running).
-  // Unless "Show parameter screen before running" is off, in which case skip
-  // straight to running the report with the current parameter values.
-  if (!requireParamScreen.value) await runPreviewModal()
+  // Skip straight to running when "Show parameter screen before running" is
+  // off, or when there's simply nothing to configure (no dataset params —
+  // the only kind this screen currently lists) — no point showing an empty screen.
+  const hasParams = (boundDataset.value?.parameters ?? []).length > 0
+  if (!requireParamScreen.value || !hasParams) await runPreviewModal()
 }
 async function runPreviewModal() {
   if (!selected.value) return
@@ -1847,12 +1850,19 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
     </div>
 
     <!-- Preview Mode popup -->
-    <div v-if="showPreviewModal" class="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 px-4 py-6" @click.self="exitPreviewModal">
-      <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl h-full max-h-[90vh] flex flex-col">
+    <div v-if="showPreviewModal" class="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50"
+      :class="previewModalMaximized ? '' : 'px-4 py-6'" @click.self="exitPreviewModal">
+      <div class="bg-white shadow-xl flex flex-col"
+        :class="previewModalMaximized ? 'w-screen h-screen rounded-none' : 'rounded-2xl w-full max-w-5xl h-full max-h-[90vh]'">
         <!-- Header -->
         <div class="shrink-0 flex items-center justify-between px-5 py-3 border-b border-slate-100">
           <h3 class="font-bold text-lg">Preview — {{ selected?.name }}</h3>
-          <button @click="exitPreviewModal" class="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+          <div class="flex items-center gap-3">
+            <button @click="previewModalMaximized = !previewModalMaximized" class="text-slate-400 hover:text-slate-600 text-sm" :title="previewModalMaximized ? 'Restore' : 'Maximize'">
+              {{ previewModalMaximized ? '🗗' : '🗖' }}
+            </button>
+            <button @click="exitPreviewModal" class="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+          </div>
         </div>
 
         <!-- Step 1: parameter screen — nothing runs until Run is clicked -->
@@ -1912,10 +1922,10 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
             </aside>
 
             <!-- Result -->
-            <div class="flex-1 overflow-auto p-5 bg-slate-50">
+            <div class="flex-1 overflow-auto p-5 bg-slate-100">
               <p v-if="previewModalError" class="text-sm text-airr-700 bg-airr-50 rounded-lg px-3 py-2 mb-3">{{ previewModalError }}</p>
               <div v-if="previewModalBusy" class="text-slate-400 text-sm">Running…</div>
-              <div v-else-if="previewModalHtml" class="bg-white rounded-xl border border-slate-100 p-5 shadow-sm">
+              <div v-else-if="previewModalHtml" class="bg-white shadow-sm mx-auto" style="max-width: 100%;">
                 <div v-html="previewModalHtml"></div>
               </div>
               <div v-else class="text-slate-400 text-sm">No output yet.</div>
