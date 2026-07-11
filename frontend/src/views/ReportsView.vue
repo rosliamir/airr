@@ -1897,6 +1897,47 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
                   class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300 disabled:bg-slate-50 disabled:text-slate-300" />
               </div>
             </div>
+
+            <!-- Fixed (layout/template) — same toggles as the editor's Parameters
+                 panel, so what's ticked there is reflected here too. -->
+            <div class="pt-2 border-t border-slate-100 space-y-1.5">
+              <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Fixed</p>
+              <label class="flex items-center gap-2 text-xs text-slate-600">
+                <input type="checkbox" :checked="fixedParamsEnabled['layout_type'] ?? true"
+                  @change="fixedParamsEnabled = { ...fixedParamsEnabled, layout_type: !(fixedParamsEnabled['layout_type'] ?? true) }"
+                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
+                Layout type — <span class="text-slate-400 capitalize">{{ editLayout }}</span>
+              </label>
+              <label class="flex items-center gap-2 text-xs text-slate-600">
+                <input type="checkbox" :checked="fixedParamsEnabled['layout_size'] ?? true"
+                  @change="fixedParamsEnabled = { ...fixedParamsEnabled, layout_size: !(fixedParamsEnabled['layout_size'] ?? true) }"
+                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
+                Layout size — <span class="text-slate-400 uppercase">{{ editPrintoutSize }}</span>
+              </label>
+              <label class="flex items-center gap-2 text-xs text-slate-600">
+                <input type="checkbox" :checked="fixedParamsEnabled['template_header'] ?? true"
+                  @change="fixedParamsEnabled = { ...fixedParamsEnabled, template_header: !(fixedParamsEnabled['template_header'] ?? true) }"
+                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
+                Template header — <span class="text-slate-400">{{ allTemplates.find(t => t.id === editTemplateHeaderId)?.name ?? '— none —' }}</span>
+              </label>
+              <label class="flex items-center gap-2 text-xs text-slate-600">
+                <input type="checkbox" :checked="fixedParamsEnabled['template_footer'] ?? true"
+                  @change="fixedParamsEnabled = { ...fixedParamsEnabled, template_footer: !(fixedParamsEnabled['template_footer'] ?? true) }"
+                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
+                Template footer — <span class="text-slate-400">{{ allTemplates.find(t => t.id === editTemplateFooterId)?.name ?? '— none —' }}</span>
+              </label>
+            </div>
+
+            <!-- Custom (report-defined) parameters -->
+            <div v-if="customParams.length" class="pt-2 border-t border-slate-100 space-y-1.5">
+              <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Custom</p>
+              <label v-for="p in customParams" :key="p.id" class="flex items-center gap-2 text-xs text-slate-600">
+                <input type="checkbox" :checked="p.enabled" @change="toggleCustomParamEnabled(p.id)"
+                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0" />
+                {{ p.title }} <span class="text-[10px] text-slate-400">({{ p.type }})</span>
+              </label>
+            </div>
+
             <p class="text-[10px] text-slate-400 pt-1">Datasource: {{ selected?.dataset?.name ?? 'none' }}</p>
             <p v-if="previewModalError" class="text-sm text-airr-700 bg-airr-50 rounded-lg px-3 py-2">{{ previewModalError }}</p>
             <div class="flex justify-end gap-2 pt-2">
