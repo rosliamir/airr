@@ -37,6 +37,7 @@ class ReportController extends Controller
     {
         $this->authorizeReport($request, $report, 'run');
         $params = (array) $request->input('params', []);
+        $this->applyDraftDefinition($request, $report);
 
         $data = ['columns' => [], 'rows' => []];
         if ($report->dataset) {
@@ -65,8 +66,9 @@ class ReportController extends Controller
     public function exportFile(Request $request, Report $report): \Symfony\Component\HttpFoundation\Response
     {
         $this->authorizeReport($request, $report, 'run');
-        $data = $request->validate(['format' => 'required|in:csv,excel', 'params' => 'nullable|array']);
+        $data = $request->validate(['format' => 'required|in:csv,excel', 'params' => 'nullable|array', 'definition' => 'nullable|array']);
         $params = (array) ($data['params'] ?? []);
+        $this->applyDraftDefinition($request, $report);
 
         $tableData = ['columns' => [], 'rows' => []];
         if ($report->dataset) {
@@ -846,6 +848,23 @@ SYSTEM;
     }
 
     // Per-report ACL gate (FR-M6 ACL) — abort 403 if the user lacks the ability.
+    // Lets Preview render the Studio's live, unsaved edits (columns, template
+    // header/footer, conditional rules, etc.) instead of only what's already
+    // persisted — an editor's changes should show up immediately without
+    // forcing a Save first. Only mutates the in-memory model (never saved);
+    // only applied for users who could actually edit this report, so a
+    // run-only viewer can't use it to see arbitrary unsaved content.
+    private function applyDraftDefinition(Request $request, Report $report): void
+    {
+        if (! $request->has('definition')) {
+            return;
+        }
+        if (! $report->allows($request->user(), 'edit')) {
+            return;
+        }
+        $report->definition = (array) $request->input('definition');
+    }
+
     private function authorizeReport(Request $request, Report $report, string $ability): void
     {
         if (! $report->allows($request->user(), $ability)) {

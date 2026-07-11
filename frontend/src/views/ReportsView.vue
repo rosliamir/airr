@@ -495,21 +495,30 @@ async function openReport(r: Report) {
   }
 }
 
+// Builds the definition object exactly as save() would send it, from the
+// live (possibly unsaved) editor state — reused by save() and by Preview so
+// Preview always reflects what's actually on screen right now, not whatever
+// was last persisted to the database.
+function buildDraftDefinition(): Record<string, unknown> {
+  let definition: Record<string, unknown>
+  try { definition = JSON.parse(defText.value) } catch { throw new Error('Definition is not valid JSON') }
+  definition.prompt = prompt.value
+  definition.prompt_history = promptHistory.value
+  definition.fixed_parameters_enabled = fixedParamsEnabled.value
+  definition.custom_parameters = customParams.value
+  definition.require_parameter_screen = requireParamScreen.value
+  definition.template_header_id = editTemplateHeaderId.value
+  definition.template_footer_id = editTemplateFooterId.value
+  return definition
+}
+
 // ── Save ─────────────────────────────────────────────────────────────────────
 async function save() {
   if (!selected.value) return
   if (selected.value.locked) { runError.value = 'This report is locked. Unlock it first.'; return }
   busy.value = true; saveMsg.value = ''; runError.value = ''
   try {
-    let definition: Record<string, unknown>
-    try { definition = JSON.parse(defText.value) } catch { throw new Error('Definition is not valid JSON') }
-    definition.prompt = prompt.value
-    definition.prompt_history = promptHistory.value
-    definition.fixed_parameters_enabled = fixedParamsEnabled.value
-    definition.custom_parameters = customParams.value
-    definition.require_parameter_screen = requireParamScreen.value
-    definition.template_header_id = editTemplateHeaderId.value
-    definition.template_footer_id = editTemplateFooterId.value
+    const definition = buildDraftDefinition()
     const permissions = Object.entries(perms.value)
       .filter(([, v]) => v.view || v.edit || v.run)
       .map(([role_id, v]) => ({ role_id: Number(role_id), ...v }))
@@ -602,8 +611,13 @@ async function runPreviewModal() {
   previewModalBusy.value = true
   previewModalError.value = ''
   try {
+    // Send the live, possibly-unsaved editor state so Preview reflects what's
+    // actually on screen (columns, template header/footer, conditional
+    // rules, toggles, etc.) rather than the last-saved database version.
+    let definition: Record<string, unknown> | undefined
+    try { definition = buildDraftDefinition() } catch { definition = undefined }
     const res = await apiRequest<{ data: { html: string; row_count: number } }>(`/reports/${selected.value.id}/run`, {
-      method: 'POST', body: JSON.stringify({ params: activePreviewParams.value }),
+      method: 'POST', body: JSON.stringify({ params: activePreviewParams.value, definition }),
     })
     previewModalHtml.value = res.data.html
     previewModalRowCount.value = res.data.row_count
@@ -631,7 +645,7 @@ async function exportPreviewModal(format: 'csv' | 'excel') {
     const res = await fetch(`${(import.meta as { env: { VITE_API_BASE_URL?: string } }).env.VITE_API_BASE_URL ?? ''}/api/reports/${selected.value.id}/export-file`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('airr_token') ?? ''}` },
-      body: JSON.stringify({ format, params: activePreviewParams.value }),
+      body: JSON.stringify({ format, params: activePreviewParams.value, definition: (() => { try { return buildDraftDefinition() } catch { return undefined } })() }),
     })
     if (!res.ok) {
       const json = await res.json().catch(() => null)

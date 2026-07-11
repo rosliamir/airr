@@ -196,7 +196,11 @@ class ReportRenderer
         $i = 0;
         foreach ($rows as $row) {
             $i++;
-            $rowClass = $striped && $i % 2 === 0 ? ' class="bg-slate-50"' : '';
+            // A matching conditional "background" rule highlights the whole row
+            // (so it reaches every column, e.g. the last one) — it takes
+            // precedence over the plain zebra stripe when both would apply.
+            $condBg = $this->rowConditionalBg($def, $row);
+            $rowClass = $condBg !== '' ? ' class="' . $condBg . '"' : ($striped && $i % 2 === 0 ? ' class="bg-slate-50"' : '');
             $numberCell = $showRowNumber ? '<td class="px-3 py-1.5 border-b border-slate-100 text-slate-400">' . $i . '</td>' : '';
             $tds = $numberCell;
             foreach ($columns as $c) {
@@ -300,22 +304,45 @@ class ReportRenderer
 
     // --- conditional formatting (FR-M6.4, simple field op value) ---
 
+    // Cell-level: only text color (a row-wide background is handled by
+    // rowConditionalBg() instead, below, so it reaches every column). Keeps
+    // checking subsequent rules for this field until one with a color is
+    // found, rather than stopping at the first match overall — otherwise an
+    // earlier color-only rule could hide a later rule's color for the same
+    // field.
     private function condClass(array $def, string $field, array $row): string
     {
         foreach ($def['conditional'] ?? [] as $rule) {
             if (($rule['field'] ?? null) !== $field) {
                 continue;
             }
-            if ($this->matches($row[$field] ?? null, $rule['op'] ?? '=', $rule['value'] ?? null)) {
-                $classes = [];
-                if ($color = $rule['style']['color'] ?? null) {
-                    $classes[] = $this->colorClass($color);
-                }
-                if ($bg = $rule['style']['background'] ?? null) {
-                    $classes[] = $this->bgClass($bg);
-                }
+            if (! $this->matches($row[$field] ?? null, $rule['op'] ?? '=', $rule['value'] ?? null)) {
+                continue;
+            }
+            if ($color = $rule['style']['color'] ?? null) {
+                return ' ' . $this->colorClass($color);
+            }
+        }
 
-                return $classes ? ' ' . implode(' ', $classes) : '';
+        return '';
+    }
+
+    // Row-level: the first matching rule (across all fields, in definition
+    // order) that specifies a background wins, so the whole <tr> is
+    // highlighted rather than just the single column the rule's condition
+    // references.
+    private function rowConditionalBg(array $def, array $row): string
+    {
+        foreach ($def['conditional'] ?? [] as $rule) {
+            $field = $rule['field'] ?? null;
+            if (! $field || ! array_key_exists($field, $row)) {
+                continue;
+            }
+            if (! $this->matches($row[$field] ?? null, $rule['op'] ?? '=', $rule['value'] ?? null)) {
+                continue;
+            }
+            if ($bg = $rule['style']['background'] ?? null) {
+                return $this->bgClass($bg);
             }
         }
 
