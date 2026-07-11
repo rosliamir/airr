@@ -164,6 +164,7 @@ function onResizeEnd() {
 
 // Report-level parameters (left panel > Parameters)
 const fixedParamsEnabled = ref<Record<string, boolean>>({})
+const requireParamScreen = ref(true)
 const customParams = ref<CustomParam[]>([])
 const showParamModal = ref(false)
 const editingParam = ref<CustomParam | null>(null)
@@ -479,6 +480,7 @@ async function openReport(r: Report) {
     testConnResult.value = ''
     fixedParamsEnabled.value = (def.fixed_parameters_enabled as Record<string, boolean>) ?? {}
     customParams.value = (def.custom_parameters as CustomParam[]) ?? []
+    requireParamScreen.value = (def.require_parameter_screen as boolean) ?? true
     // seed role grants
     const map: Record<number, { view: boolean; edit: boolean; run: boolean }> = {}
     for (const g of selected.value.permissions ?? []) map[g.role_id] = { view: g.view, edit: g.edit, run: g.run }
@@ -505,6 +507,7 @@ async function save() {
     definition.prompt_history = promptHistory.value
     definition.fixed_parameters_enabled = fixedParamsEnabled.value
     definition.custom_parameters = customParams.value
+    definition.require_parameter_screen = requireParamScreen.value
     definition.template_header_id = editTemplateHeaderId.value
     definition.template_footer_id = editTemplateFooterId.value
     const permissions = Object.entries(perms.value)
@@ -586,6 +589,9 @@ async function openPreviewModal() {
   previewModalStarted.value = false
   // Show the parameter screen first — the report only actually runs once the
   // user explicitly clicks Run (or Cancel to back out without running).
+  // Unless "Show parameter screen before running" is off, in which case skip
+  // straight to running the report with the current parameter values.
+  if (!requireParamScreen.value) await runPreviewModal()
 }
 async function runPreviewModal() {
   if (!selected.value) return
@@ -778,6 +784,7 @@ async function restoreHistory(entry: HistoryEntry) {
   // with whatever was left in memory from before the restore.
   fixedParamsEnabled.value = (def.fixed_parameters_enabled as Record<string, boolean>) ?? {}
   customParams.value = (def.custom_parameters as CustomParam[]) ?? []
+  requireParamScreen.value = (def.require_parameter_screen as boolean) ?? true
   promptHistory.value = (def.prompt_history as PromptHistoryEntry[]) ?? promptHistory.value
   editTemplateHeaderId.value = (def.template_header_id as number) ?? null
   editTemplateFooterId.value = (def.template_footer_id as number) ?? null
@@ -1256,6 +1263,15 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
                 <span class="text-slate-400 text-xs">{{ openSections.parameters ? '▾' : '▸' }}</span>
               </button>
               <div v-show="openSections.parameters" class="px-3 pb-3 space-y-3">
+                <!-- Preview behaviour -->
+                <div class="flex items-start gap-2 bg-slate-50 rounded-lg px-2 py-1.5">
+                  <input type="checkbox" :checked="requireParamScreen" @change="requireParamScreen = !requireParamScreen"
+                    class="rounded border-slate-300 text-airr-500 focus:ring-airr-300 shrink-0 mt-0.5" />
+                  <div class="min-w-0 flex-1">
+                    <label class="block text-[11px] font-medium text-slate-600">Show parameter screen before running</label>
+                    <p class="text-[10px] text-slate-400">If off, Preview skips straight to the report using current parameter values.</p>
+                  </div>
+                </div>
                 <!-- Fixed (built-in + dataset) -->
                 <div>
                   <div class="text-[10px] font-medium text-slate-400 uppercase tracking-wide mb-1">Fixed</div>

@@ -590,6 +590,7 @@ SYSTEM;
         $decoded['prompt'] = $data['prompt'];
         $decoded['fixed_parameters_enabled'] = $existing['fixed_parameters_enabled'] ?? [];
         $decoded['custom_parameters'] = $existing['custom_parameters'] ?? [];
+        $decoded['require_parameter_screen'] = $existing['require_parameter_screen'] ?? true;
         $promptHistory = (array) ($existing['prompt_history'] ?? []);
         $promptHistory[] = ['text' => $data['prompt'], 'at' => now()->toIso8601String()];
         $decoded['prompt_history'] = $promptHistory;
@@ -898,6 +899,7 @@ SYSTEM;
             // Report-level parameters (left panel > Parameters): a toggle map for the
             // dataset's fixed params, plus report-defined custom parameters.
             'definition.fixed_parameters_enabled'          => 'nullable|array',
+            'definition.require_parameter_screen'          => 'nullable|boolean',
             'definition.template_header_id' => 'nullable|integer|exists:templates,id',
             'definition.template_footer_id' => 'nullable|integer|exists:templates,id',
             'definition.custom_parameters'                 => 'nullable|array',
