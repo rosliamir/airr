@@ -590,11 +590,11 @@ async function openPreviewModal() {
   previewModalStarted.value = false
   // Show the parameter screen first — the report only actually runs once the
   // user explicitly clicks Run (or Cancel to back out without running).
-  // Skip straight to running when "Show parameter screen before running" is
-  // off, or when there's simply nothing to configure (no dataset params —
-  // the only kind this screen currently lists) — no point showing an empty screen.
-  const hasParams = (boundDataset.value?.parameters ?? []).length > 0
-  if (!requireParamScreen.value || !hasParams) await runPreviewModal()
+  // Only skip straight to running when "Show parameter screen before
+  // running" is explicitly off — if it's on, always show the screen
+  // (even with zero dataset params, it still shows a "no parameters, just
+  // click Run" message) since the toggle is what the user controls directly.
+  if (!requireParamScreen.value) await runPreviewModal()
 }
 async function runPreviewModal() {
   if (!selected.value) return
