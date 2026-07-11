@@ -40,13 +40,24 @@ class ReportController extends Controller
         $this->applyDraftDefinition($request, $report);
 
         $data = ['columns' => [], 'rows' => []];
+        $warning = null;
         if ($report->dataset) {
+            // A filled-in parameter narrows the underlying query to a
+            // meaningful, bounded slice — only then is it safe to fetch every
+            // matching row. With no filter at all, an unbounded table (this
+            // has happened with millions of rows) would time out or produce
+            // an unrenderable result, so we cap it and say so instead.
+            $isFiltered = $this->hasFilterValue($params);
             try {
-                $result = $this->connector->run($report->dataset, $params);
+                $result = $this->connector->run($report->dataset, $params, 1, 20, $isFiltered);
             } catch (\Throwable $e) {
                 return $this->sendError(503, 'DATASOURCE_UNAVAILABLE', 'Could not reach the data source: ' . $e->getMessage());
             }
             $data = ['columns' => $result['columns'] ?? [], 'rows' => $result['rows'] ?? []];
+            if (! $isFiltered) {
+                $warning = 'No parameter value was supplied to filter this dataset, so only a limited sample (20 rows) is shown. '
+                    . 'Fill in at least one parameter value to retrieve the complete, filtered result.';
+            }
         }
 
         $html = $this->renderer->render($report, $data);
@@ -56,7 +67,19 @@ class ReportController extends Controller
             'html'      => $html,
             'columns'   => $data['columns'],
             'row_count' => count($data['rows']),
+            'warning'   => $warning,
         ]);
+    }
+
+    private function hasFilterValue(array $params): bool
+    {
+        foreach ($params as $value) {
+            if ($value !== null && $value !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // Preview-mode export: runs the report with the given (ticked) parameters,
@@ -73,7 +96,7 @@ class ReportController extends Controller
         $tableData = ['columns' => [], 'rows' => []];
         if ($report->dataset) {
             try {
-                $result = $this->connector->run($report->dataset, $params);
+                $result = $this->connector->run($report->dataset, $params, 1, 20, $this->hasFilterValue($params));
             } catch (\Throwable $e) {
                 return $this->sendError(503, 'DATASOURCE_UNAVAILABLE', 'Could not reach the data source: ' . $e->getMessage());
             }

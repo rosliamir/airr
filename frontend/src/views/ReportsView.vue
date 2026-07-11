@@ -64,6 +64,7 @@ const loading  = ref(true)
 const busy     = ref(false)
 const saveMsg  = ref('')
 const runError = ref('')
+const runWarning = ref('')
 
 // Left panel
 const prompt   = ref('')   // stored inside definition.prompt
@@ -454,7 +455,7 @@ async function load() {
 const sidebar = inject<{ collapsed: { value: boolean }; setCollapsed: (v: boolean) => void } | null>('sidebar', null)
 
 async function openReport(r: Report) {
-  preview.value = ''; rowCount.value = null; runError.value = ''; saveMsg.value = ''
+  preview.value = ''; rowCount.value = null; runError.value = ''; runWarning.value = ''; saveMsg.value = ''
   historyEntries.value = []; logEntries.value = []
   sidebar?.setCollapsed(true) // only minimise the main nav once a specific report is actually opened
   try {
@@ -577,6 +578,7 @@ const previewModalHtml = ref('')
 const previewModalRowCount = ref<number | null>(null)
 const previewModalBusy = ref(false)
 const previewModalError = ref('')
+const previewModalWarning = ref('')
 const previewModalExporting = ref<'csv' | 'excel' | null>(null)
 const previewModalStarted = ref(false) // false = show the parameter screen (Run/Cancel); true = show the result
 const previewModalMaximized = ref(false)
@@ -602,6 +604,7 @@ async function openPreviewModal() {
   showPreviewModal.value = true
   previewModalHtml.value = ''
   previewModalError.value = ''
+  previewModalWarning.value = ''
   previewModalRowCount.value = null
   previewModalStarted.value = false
   // Show the parameter screen first — the report only actually runs once the
@@ -617,17 +620,19 @@ async function runPreviewModal() {
   previewModalStarted.value = true
   previewModalBusy.value = true
   previewModalError.value = ''
+  previewModalWarning.value = ''
   try {
     // Send the live, possibly-unsaved editor state so Preview reflects what's
     // actually on screen (columns, template header/footer, conditional
     // rules, toggles, etc.) rather than the last-saved database version.
     let definition: Record<string, unknown> | undefined
     try { definition = buildDraftDefinition() } catch { definition = undefined }
-    const res = await apiRequest<{ data: { html: string; row_count: number } }>(`/reports/${selected.value.id}/run`, {
+    const res = await apiRequest<{ data: { html: string; row_count: number; warning?: string | null } }>(`/reports/${selected.value.id}/run`, {
       method: 'POST', body: JSON.stringify({ params: activePreviewParams.value, definition }),
     })
     previewModalHtml.value = res.data.html
     previewModalRowCount.value = res.data.row_count
+    previewModalWarning.value = res.data.warning ?? ''
   } catch (e) {
     previewModalError.value = e instanceof ApiException ? e.error.message : 'Run failed'
   } finally {
@@ -733,13 +738,14 @@ function templateName(id: number) {
 // ── Run ──────────────────────────────────────────────────────────────────────
 async function run() {
   if (!selected.value) return
-  busy.value = true; runError.value = ''; preview.value = ''
+  busy.value = true; runError.value = ''; runWarning.value = ''; preview.value = ''
   try {
-    const res = await apiRequest<{ data: { html: string; row_count: number } }>(`/reports/${selected.value.id}/run`, {
+    const res = await apiRequest<{ data: { html: string; row_count: number; warning?: string | null } }>(`/reports/${selected.value.id}/run`, {
       method: 'POST', body: JSON.stringify({ params: runParams.value }),
     })
     preview.value  = res.data.html
     rowCount.value = res.data.row_count
+    runWarning.value = res.data.warning ?? ''
   } catch (e) {
     runError.value = e instanceof ApiException ? e.error.message : 'Run failed'
     bottomTab.value = 'error'
@@ -1445,6 +1451,7 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
             </div>
             <!-- Preview content -->
             <div class="flex-1 overflow-auto p-5">
+              <p v-if="runWarning" class="text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-3">{{ runWarning }}</p>
               <div v-if="preview" class="bg-white rounded-xl border border-slate-100 p-5 shadow-sm">
                 <div v-html="preview"></div>
               </div>
@@ -1947,6 +1954,7 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
             <!-- Result -->
             <div class="flex-1 overflow-auto p-5 bg-slate-100">
               <p v-if="previewModalError" class="text-sm text-airr-700 bg-airr-50 rounded-lg px-3 py-2 mb-3">{{ previewModalError }}</p>
+              <p v-if="previewModalWarning" class="text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-3">{{ previewModalWarning }}</p>
               <div v-if="previewModalBusy" class="text-slate-400 text-sm">Running…</div>
               <div v-else-if="previewModalHtml" class="bg-white shadow-sm mx-auto" style="max-width: 100%;">
                 <div v-html="previewModalHtml"></div>
