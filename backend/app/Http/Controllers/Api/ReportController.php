@@ -13,9 +13,11 @@ use App\Services\Ai\AiProvider;
 use App\Services\Ai\ModelResolver;
 use App\Services\AuditService;
 use App\Services\ConnectorService;
+use App\Services\ConstantResolver;
 use App\Services\Reporting\ReportRenderer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
@@ -29,11 +31,12 @@ class ReportController extends Controller
         protected AuditService $audit,
         protected ConnectorService $connector,
         protected ReportRenderer $renderer,
+        protected ConstantResolver $constants,
     ) {}
 
     // FR-M6.2 — execute a report: fetch dataset rows (with runtime params) and
     // render deterministic HTML. reports.run.
-    public function run(Request $request, Report $report): JsonResponse
+    public function run(Request $request, Report $report, ModelResolver $resolver, AiProvider $ai): JsonResponse
     {
         $this->authorizeReport($request, $report, 'run');
         $params = (array) $request->input('params', []);
@@ -58,6 +61,7 @@ class ReportController extends Controller
                 $warning = 'No parameter value was supplied to filter this dataset, so only a limited sample (20 rows) is shown. '
                     . 'Fill in at least one parameter value to retrieve the complete, filtered result.';
             }
+            $data['rows'] = $this->applyConditionFilters($report, $data['rows'], $resolver, $ai);
         }
 
         $html = $this->renderer->render($report, $data);
@@ -82,11 +86,75 @@ class ReportController extends Controller
         return false;
     }
 
+    // Custom parameters may carry a plain-language "filter_condition" (e.g.
+    // "only show rows where jumlah bayaran is above {{GLOBAL:SST}}") instead
+    // of a hand-written SQL WHERE — resolve any constant tokens in it, then
+    // ask the AI which of the already-fetched rows satisfy every enabled
+    // condition. Best-effort: if there are no conditions, or the AI call
+    // fails or returns something unusable, the original rows are returned
+    // unfiltered rather than failing the whole run.
+    private function applyConditionFilters(Report $report, array $rows, ModelResolver $resolver, AiProvider $ai): array
+    {
+        if (! $rows) {
+            return $rows;
+        }
+        $def = $report->definition ?? [];
+        $projectId = $report->project_id ?? null;
+        $user = Auth::user();
+
+        $conditions = [];
+        foreach ($def['custom_parameters'] ?? [] as $p) {
+            $text = trim((string) ($p['filter_condition'] ?? ''));
+            if (($p['enabled'] ?? true) && $text !== '') {
+                $conditions[] = $this->constants->resolve($text, $projectId, $user);
+            }
+        }
+        if (! $conditions) {
+            return $rows;
+        }
+
+        try {
+            $model = $resolver->model('generation');
+            $prompt = "Rows (JSON array, 0-indexed):\n" . json_encode(array_values($rows), JSON_PARTIAL_OUTPUT_ON_ERROR)
+                . "\n\nConditions (a row must satisfy ALL of these to be kept):\n- " . implode("\n- ", $conditions)
+                . "\n\nReturn ONLY a JSON array of the 0-based indices of the rows to KEEP — nothing else, no markdown fences, no explanation.";
+            $raw = $ai->generate($model, $prompt, [
+                'system' => 'You filter tabular data rows against plain-language conditions. Respond with only a JSON array of integer indices.',
+                'temperature' => 0,
+            ]);
+            $indices = $this->extractJsonArrayOfInts($raw);
+            if ($indices === null) {
+                return $rows;
+            }
+
+            return array_values(array_intersect_key($rows, array_flip($indices)));
+        } catch (\Throwable) {
+            return $rows;
+        }
+    }
+
+    private function extractJsonArrayOfInts(string $raw): ?array
+    {
+        $trimmed = trim($raw);
+        if (preg_match('/^```(?:json)?\s*(.*?)\s*```$/s', $trimmed, $m)) {
+            $trimmed = trim($m[1]);
+        }
+        if (! preg_match('/\[.*\]/s', $trimmed, $m)) {
+            return null;
+        }
+        $decoded = json_decode($m[0], true);
+        if (json_last_error() !== JSON_ERROR_NONE || ! is_array($decoded)) {
+            return null;
+        }
+
+        return array_values(array_filter(array_map(fn ($v) => is_numeric($v) ? (int) $v : null, $decoded), fn ($v) => $v !== null));
+    }
+
     // Preview-mode export: runs the report with the given (ticked) parameters,
     // same as run(), then streams the result as a real CSV or Excel file via
     // PhpSpreadsheet — using the exact same column/value resolution as the HTML
     // preview (ReportRenderer::tabularData), so the file matches what's on screen.
-    public function exportFile(Request $request, Report $report): \Symfony\Component\HttpFoundation\Response
+    public function exportFile(Request $request, Report $report, ModelResolver $resolver, AiProvider $ai): \Symfony\Component\HttpFoundation\Response
     {
         $this->authorizeReport($request, $report, 'run');
         $data = $request->validate(['format' => 'required|in:csv,excel', 'params' => 'nullable|array', 'definition' => 'nullable|array']);
@@ -101,6 +169,7 @@ class ReportController extends Controller
                 return $this->sendError(503, 'DATASOURCE_UNAVAILABLE', 'Could not reach the data source: ' . $e->getMessage());
             }
             $tableData = ['columns' => $result['columns'] ?? [], 'rows' => $result['rows'] ?? []];
+            $tableData['rows'] = $this->applyConditionFilters($report, $tableData['rows'], $resolver, $ai);
         }
 
         $table = $this->renderer->tabularData($report, $tableData);
@@ -958,6 +1027,7 @@ SYSTEM;
             'definition.custom_parameters.*.data_column'    => 'nullable|string|max:120',
             'definition.custom_parameters.*.remark'         => 'nullable|string|max:500',
             'definition.custom_parameters.*.enabled'        => 'nullable|boolean',
+            'definition.custom_parameters.*.filter_condition' => 'nullable|string|max:1000',
             // Per-report ACL grants (FR-M6 ACL).
             'permissions'           => 'nullable|array',
             'permissions.*.role_id' => 'required_with:permissions|integer|exists:roles,id',

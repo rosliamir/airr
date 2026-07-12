@@ -28,6 +28,10 @@ type CustomParam = {
   source_type?: 'json' | 'datasource'
   data_source_id?: number | null; dataset_id?: number | null; data_column?: string | null
   remark?: string; enabled: boolean
+  // Natural-language filter/condition — interpreted by the AI at Preview
+  // time to filter the fetched rows (e.g. "only show rows where jumlah
+  // bayaran is above {{GLOBAL:SST}}"), rather than a hand-written SQL WHERE.
+  filter_condition?: string
 }
 type Constant = { id: number; scope: string; key: string; label?: string }
 type HistoryEntry = { id: number; action: string; snapshot: Record<string, unknown>; version_label?: string; changed_by_name: string; created_at: string }
@@ -171,7 +175,7 @@ const customParams = ref<CustomParam[]>([])
 const customParamValues = ref<Record<string, string | boolean>>({})
 const showParamModal = ref(false)
 const editingParam = ref<CustomParam | null>(null)
-const paramForm = ref<CustomParam>({ id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true })
+const paramForm = ref<CustomParam>({ id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true, filter_condition: '' })
 const paramOptionsText = ref('') // comma-separated editor for dropdown/radio options (JSON source)
 const paramOptionsJsonError = ref('')
 const datasetsForParam = computed(() => allDatasets.value.filter(d => d.data_source_id === paramForm.value.data_source_id))
@@ -190,9 +194,9 @@ async function loadConstants() {
 function constantToken(c: Constant): string {
   return `{{${c.scope.toUpperCase()}:${c.key}}}`
 }
-function insertConstant(token: string) {
+function insertConstant(token: string, field: 'default_value' | 'filter_condition' = 'default_value') {
   if (!token) return
-  paramForm.value.default_value = `${(paramForm.value.default_value as string) ?? ''}${token}`
+  paramForm.value[field] = `${(paramForm.value[field] as string) ?? ''}${token}`
 }
 
 // Center
@@ -891,7 +895,7 @@ function toggleAllGrant(field: 'view' | 'edit' | 'run') {
 // ── Report-level parameters ──────────────────────────────────────────────────
 function openAddParam() {
   editingParam.value = null
-  paramForm.value = { id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true }
+  paramForm.value = { id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true, filter_condition: '' }
   paramOptionsText.value = ''
   paramOptionsJsonError.value = ''
   loadConstants()
@@ -1875,6 +1879,19 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
           </div>
         </template>
 
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-sm font-medium text-slate-600">Filter / condition <span class="text-slate-400 font-normal">· optional</span></label>
+            <select v-if="constants.length" @change="insertConstant(($event.target as HTMLSelectElement).value, 'filter_condition'); ($event.target as HTMLSelectElement).value = ''"
+              class="text-[11px] border border-slate-200 rounded px-1.5 py-0.5 text-slate-500">
+              <option value="">Insert constant…</option>
+              <option v-for="c in constants" :key="c.id" :value="constantToken(c)">{{ c.label || c.key }}</option>
+            </select>
+          </div>
+          <textarea v-model="paramForm.filter_condition" rows="2" placeholder="e.g. only show rows where jumlah bayaran is above {{GLOBAL:SST}}"
+            class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-airr-300 outline-none"></textarea>
+          <p class="text-[10px] text-slate-400 mt-1">Described in plain language — the AI applies it to filter the data when this report is previewed/run.</p>
+        </div>
         <div>
           <label class="block text-sm font-medium text-slate-600 mb-1">Remark <span class="text-slate-400 font-normal">· optional</span></label>
           <textarea v-model="paramForm.remark" rows="2" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none"></textarea>
