@@ -86,37 +86,29 @@ class ReportController extends Controller
         return false;
     }
 
-    // Custom parameters may carry a plain-language "filter_condition" (e.g.
-    // "only show rows where jumlah bayaran is above {{GLOBAL:SST}}") instead
-    // of a hand-written SQL WHERE — resolve any constant tokens in it, then
-    // ask the AI which of the already-fetched rows satisfy every enabled
-    // condition. Best-effort: if there are no conditions, or the AI call
-    // fails or returns something unusable, the original rows are returned
-    // unfiltered rather than failing the whole run.
+    // The report's Property panel may carry a single plain-language
+    // "filter_condition" (e.g. "only show rows where jumlah bayaran is above
+    // {{GLOBAL:SST}}") instead of a hand-written SQL WHERE — resolve any
+    // constant tokens in it, then ask the AI which of the already-fetched
+    // rows satisfy it. Best-effort: if there's no condition set, or the AI
+    // call fails or returns something unusable, the original rows are
+    // returned unfiltered rather than failing the whole run.
     private function applyConditionFilters(Report $report, array $rows, ModelResolver $resolver, AiProvider $ai): array
     {
         if (! $rows) {
             return $rows;
         }
         $def = $report->definition ?? [];
-        $projectId = $report->project_id ?? null;
-        $user = Auth::user();
-
-        $conditions = [];
-        foreach ($def['custom_parameters'] ?? [] as $p) {
-            $text = trim((string) ($p['filter_condition'] ?? ''));
-            if (($p['enabled'] ?? true) && $text !== '') {
-                $conditions[] = $this->constants->resolve($text, $projectId, $user);
-            }
-        }
-        if (! $conditions) {
+        $condition = trim((string) ($def['filter_condition'] ?? ''));
+        if ($condition === '') {
             return $rows;
         }
+        $condition = $this->constants->resolve($condition, $report->project_id ?? null, Auth::user());
 
         try {
             $model = $resolver->model('generation');
             $prompt = "Rows (JSON array, 0-indexed):\n" . json_encode(array_values($rows), JSON_PARTIAL_OUTPUT_ON_ERROR)
-                . "\n\nConditions (a row must satisfy ALL of these to be kept):\n- " . implode("\n- ", $conditions)
+                . "\n\nCondition (a row must satisfy this to be kept):\n{$condition}"
                 . "\n\nReturn ONLY a JSON array of the 0-based indices of the rows to KEEP — nothing else, no markdown fences, no explanation.";
             $raw = $ai->generate($model, $prompt, [
                 'system' => 'You filter tabular data rows against plain-language conditions. Respond with only a JSON array of integer indices.',
@@ -685,6 +677,7 @@ SYSTEM;
         $decoded['fixed_parameters_enabled'] = $existing['fixed_parameters_enabled'] ?? [];
         $decoded['custom_parameters'] = $existing['custom_parameters'] ?? [];
         $decoded['require_parameter_screen'] = $existing['require_parameter_screen'] ?? true;
+        $decoded['filter_condition'] = $existing['filter_condition'] ?? '';
         $promptHistory = (array) ($existing['prompt_history'] ?? []);
         $promptHistory[] = ['text' => $data['prompt'], 'at' => now()->toIso8601String()];
         $decoded['prompt_history'] = $promptHistory;
@@ -1011,6 +1004,7 @@ SYSTEM;
             // dataset's fixed params, plus report-defined custom parameters.
             'definition.fixed_parameters_enabled'          => 'nullable|array',
             'definition.require_parameter_screen'          => 'nullable|boolean',
+            'definition.filter_condition'                  => 'nullable|string|max:1000',
             'definition.template_header_id' => 'nullable|integer|exists:templates,id',
             'definition.template_footer_id' => 'nullable|integer|exists:templates,id',
             'definition.custom_parameters'                 => 'nullable|array',
@@ -1027,7 +1021,6 @@ SYSTEM;
             'definition.custom_parameters.*.data_column'    => 'nullable|string|max:120',
             'definition.custom_parameters.*.remark'         => 'nullable|string|max:500',
             'definition.custom_parameters.*.enabled'        => 'nullable|boolean',
-            'definition.custom_parameters.*.filter_condition' => 'nullable|string|max:1000',
             // Per-report ACL grants (FR-M6 ACL).
             'permissions'           => 'nullable|array',
             'permissions.*.role_id' => 'required_with:permissions|integer|exists:roles,id',

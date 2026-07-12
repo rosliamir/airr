@@ -28,10 +28,6 @@ type CustomParam = {
   source_type?: 'json' | 'datasource'
   data_source_id?: number | null; dataset_id?: number | null; data_column?: string | null
   remark?: string; enabled: boolean
-  // Natural-language filter/condition — interpreted by the AI at Preview
-  // time to filter the fetched rows (e.g. "only show rows where jumlah
-  // bayaran is above {{GLOBAL:SST}}"), rather than a hand-written SQL WHERE.
-  filter_condition?: string
 }
 type Constant = { id: number; scope: string; key: string; label?: string }
 type HistoryEntry = { id: number; action: string; snapshot: Record<string, unknown>; version_label?: string; changed_by_name: string; created_at: string }
@@ -175,7 +171,7 @@ const customParams = ref<CustomParam[]>([])
 const customParamValues = ref<Record<string, string | boolean>>({})
 const showParamModal = ref(false)
 const editingParam = ref<CustomParam | null>(null)
-const paramForm = ref<CustomParam>({ id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true, filter_condition: '' })
+const paramForm = ref<CustomParam>({ id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true })
 const paramOptionsText = ref('') // comma-separated editor for dropdown/radio options (JSON source)
 const paramOptionsJsonError = ref('')
 const datasetsForParam = computed(() => allDatasets.value.filter(d => d.data_source_id === paramForm.value.data_source_id))
@@ -194,9 +190,9 @@ async function loadConstants() {
 function constantToken(c: Constant): string {
   return `{{${c.scope.toUpperCase()}:${c.key}}}`
 }
-function insertConstant(token: string, field: 'default_value' | 'filter_condition' = 'default_value') {
+function insertConstant(token: string) {
   if (!token) return
-  paramForm.value[field] = `${(paramForm.value[field] as string) ?? ''}${token}`
+  paramForm.value.default_value = `${(paramForm.value.default_value as string) ?? ''}${token}`
 }
 
 // Center
@@ -207,6 +203,9 @@ const runParams = ref<Record<string, string>>({})
 // Right panel
 const editName   = ref('')
 const editDesc   = ref('')
+// Report-level, plain-language filter/condition — resolved constants + the
+// text are sent to the AI at Run/Preview time to filter the fetched rows.
+const editFilterCondition = ref('')
 const editType   = ref('table')
 const editStatus = ref('draft')
 const editTagsText = ref('')
@@ -470,6 +469,7 @@ async function openReport(r: Report) {
     promptHistory.value = (def.prompt_history as PromptHistoryEntry[]) ?? []
     editName.value   = selected.value.name
     editDesc.value   = selected.value.description ?? ''
+    editFilterCondition.value = (def.filter_condition as string) ?? ''
     editType.value   = selected.value.type
     editStatus.value = selected.value.status
     editTagsText.value = (selected.value.tags ?? []).join(', ')
@@ -498,6 +498,7 @@ async function openReport(r: Report) {
     for (const p of boundDataset.value?.parameters ?? []) runParams.value[p.name] = p.default ?? ''
     // load history
     await loadHistory()
+    await loadConstants()
   } catch (e) {
     runError.value = e instanceof ApiException ? e.error.message : 'Failed to open report'
   }
@@ -517,6 +518,7 @@ function buildDraftDefinition(): Record<string, unknown> {
   definition.require_parameter_screen = requireParamScreen.value
   definition.template_header_id = editTemplateHeaderId.value
   definition.template_footer_id = editTemplateFooterId.value
+  definition.filter_condition = editFilterCondition.value
   return definition
 }
 
@@ -820,6 +822,7 @@ async function restoreHistory(entry: HistoryEntry) {
   customParams.value = (def.custom_parameters as CustomParam[]) ?? []
   customParamValues.value = Object.fromEntries(customParams.value.map(p => [p.id, p.default_value ?? (p.type === 'checkbox' ? false : '')]))
   requireParamScreen.value = (def.require_parameter_screen as boolean) ?? true
+  editFilterCondition.value = (def.filter_condition as string) ?? ''
   promptHistory.value = (def.prompt_history as PromptHistoryEntry[]) ?? promptHistory.value
   editTemplateHeaderId.value = (def.template_header_id as number) ?? null
   editTemplateFooterId.value = (def.template_footer_id as number) ?? null
@@ -895,7 +898,7 @@ function toggleAllGrant(field: 'view' | 'edit' | 'run') {
 // ── Report-level parameters ──────────────────────────────────────────────────
 function openAddParam() {
   editingParam.value = null
-  paramForm.value = { id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true, filter_condition: '' }
+  paramForm.value = { id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true }
   paramOptionsText.value = ''
   paramOptionsJsonError.value = ''
   loadConstants()
@@ -1617,6 +1620,19 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
                 <textarea v-model="editDesc" :disabled="selected.locked" rows="3" class="w-full text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-airr-300 resize-none disabled:bg-slate-50"></textarea>
               </div>
               <div>
+                <div class="flex items-center justify-between mb-0.5">
+                  <label class="text-[11px] text-slate-500">Filter / condition <span class="text-slate-400">· optional</span></label>
+                  <select v-if="constants.length" :disabled="selected.locked" @change="editFilterCondition = `${editFilterCondition}${($event.target as HTMLSelectElement).value}`; ($event.target as HTMLSelectElement).value = ''"
+                    class="text-[10px] border border-slate-200 rounded px-1 py-0.5 text-slate-500">
+                    <option value="">Insert constant…</option>
+                    <option v-for="c in constants" :key="c.id" :value="constantToken(c)">{{ c.label || c.key }}</option>
+                  </select>
+                </div>
+                <textarea v-model="editFilterCondition" :disabled="selected.locked" rows="2" placeholder="e.g. only show rows where jumlah bayaran is above {{GLOBAL:SST}}"
+                  class="w-full text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-airr-300 resize-none disabled:bg-slate-50"></textarea>
+                <p class="text-[10px] text-slate-400 mt-0.5">Plain language — the AI applies it to filter the data when this report is run/previewed.</p>
+              </div>
+              <div>
                 <label class="block text-[11px] text-slate-500 mb-0.5">Definition JSON</label>
                 <textarea v-model="defText" :disabled="selected.locked" rows="8" spellcheck="false"
                   class="w-full font-mono text-[10px] rounded-lg border border-slate-200 px-2 py-1.5 outline-none focus:ring-2 focus:ring-airr-300 resize-none disabled:bg-slate-50"></textarea>
@@ -1879,19 +1895,6 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
           </div>
         </template>
 
-        <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="text-sm font-medium text-slate-600">Filter / condition <span class="text-slate-400 font-normal">· optional</span></label>
-            <select v-if="constants.length" @change="insertConstant(($event.target as HTMLSelectElement).value, 'filter_condition'); ($event.target as HTMLSelectElement).value = ''"
-              class="text-[11px] border border-slate-200 rounded px-1.5 py-0.5 text-slate-500">
-              <option value="">Insert constant…</option>
-              <option v-for="c in constants" :key="c.id" :value="constantToken(c)">{{ c.label || c.key }}</option>
-            </select>
-          </div>
-          <textarea v-model="paramForm.filter_condition" rows="2" placeholder="e.g. only show rows where jumlah bayaran is above {{GLOBAL:SST}}"
-            class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-airr-300 outline-none"></textarea>
-          <p class="text-[10px] text-slate-400 mt-1">Described in plain language — the AI applies it to filter the data when this report is previewed/run.</p>
-        </div>
         <div>
           <label class="block text-sm font-medium text-slate-600 mb-1">Remark <span class="text-slate-400 font-normal">· optional</span></label>
           <textarea v-model="paramForm.remark" rows="2" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none"></textarea>
