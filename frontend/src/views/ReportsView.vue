@@ -609,6 +609,10 @@ const previewModalRowCount = ref<number | null>(null)
 const previewModalBusy = ref(false)
 const previewModalError = ref('')
 const previewModalWarning = ref('')
+// The linked header template's "Parameter Screen" welcome/intro content —
+// shown above the parameter form (Step 1), never mixed into the report's
+// own rendered header.
+const previewParameterScreenHtml = ref('')
 const previewModalExporting = ref<'csv' | 'excel' | null>(null)
 const previewModalStarted = ref(false) // false = show the parameter screen (Run/Cancel); true = show the result
 const previewModalMaximized = ref(false)
@@ -696,6 +700,15 @@ async function openPreviewModal() {
   previewModalWarning.value = ''
   previewModalRowCount.value = null
   previewModalStarted.value = false
+  previewParameterScreenHtml.value = ''
+  try {
+    let definition: Record<string, unknown> | undefined
+    try { definition = buildDraftDefinition() } catch { definition = undefined }
+    const res = await apiRequest<{ data: { html: string } }>(`/reports/${selected.value.id}/parameter-screen`, {
+      method: 'POST', body: JSON.stringify({ definition }),
+    })
+    previewParameterScreenHtml.value = res.data.html
+  } catch { /* non-critical — parameter screen just stays empty */ }
   // Show the parameter screen first — the report only actually runs once the
   // user explicitly clicks Run (or Cancel to back out without running).
   // Only skip straight to running when "Show parameter screen before
@@ -2026,6 +2039,7 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
              a user fills in — they're applied automatically when rendering. -->
         <div v-if="!previewModalStarted" class="flex-1 overflow-y-auto p-6 flex items-start justify-center">
           <div class="w-full max-w-md space-y-3">
+            <div v-if="previewParameterScreenHtml" class="text-sm text-slate-700 pb-2 border-b border-slate-100" v-html="previewParameterScreenHtml"></div>
             <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Parameters</p>
             <div v-if="!enabledDatasetParams.length && !enabledCustomParams.length" class="text-xs text-slate-400">No parameters — just click Run.</div>
 

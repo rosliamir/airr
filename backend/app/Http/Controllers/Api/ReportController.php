@@ -62,14 +62,6 @@ class ReportController extends Controller
                 return $this->sendError(503, 'DATASOURCE_UNAVAILABLE', 'Could not reach the data source: ' . $e->getMessage());
             }
             $data = ['columns' => $result['columns'] ?? [], 'rows' => $result['rows'] ?? []];
-            // Preview is opted into explicitly (apply_filter) and may be
-            // narrowing the data via a custom parameter + Filter/condition
-            // rather than a dataset parameter — the sample-only warning
-            // doesn't apply there; it's only relevant to a plain Run.
-            if (! $isFiltered && ! $applyFilter) {
-                $warning = 'No parameter value was supplied to filter this dataset, so only a limited sample (20 rows) is shown. '
-                    . 'Fill in at least one parameter value to retrieve the complete, filtered result.';
-            }
             if ($applyFilter) {
                 $data['rows'] = $this->applyConditionFilters($report, $data['rows'], $resolver, $ai, $customParams);
             }
@@ -84,6 +76,27 @@ class ReportController extends Controller
             'row_count' => count($data['rows']),
             'warning'   => $warning,
         ]);
+    }
+
+    // The linked header Template's "Parameter Screen" field (a welcome/intro
+    // message meant for the parameter entry step) is a distinct field from
+    // that same template's Header — it must NOT be mixed into the rendered
+    // report output. Preview's Step 1 fetches it separately via this.
+    public function parameterScreen(Request $request, Report $report): JsonResponse
+    {
+        $this->authorizeReport($request, $report, 'run');
+        $this->applyDraftDefinition($request, $report);
+        $def = $report->definition ?? [];
+        $templateId = $def['template_header_id'] ?? null;
+        $html = '';
+        if ($templateId) {
+            $template = Template::find($templateId);
+            if ($template && $template->parameter_screen) {
+                $html = $this->constants->resolve((string) $template->parameter_screen, $report->project_id ?? null, Auth::user(), null, null, $report->name);
+            }
+        }
+
+        return $this->sendOk(['html' => $html]);
     }
 
     private function hasFilterValue(array $params): bool
