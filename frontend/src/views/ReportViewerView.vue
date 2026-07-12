@@ -48,6 +48,10 @@ const promptHistory = ref<{ text: string; at: string }[]>([])
 const saveName = ref('')
 const saveBusy = ref(false)
 const shareUrl = computed(() => savedView.value ? `${window.location.origin}/views/${savedView.value.id}` : '')
+// Report-level "Show header/menu" setting — off means this view renders bare
+// (no sidebar/topbar), suitable for a clean public-style share link.
+const showChrome = computed(() => (definition.value.show_header_menu as boolean | undefined) ?? true)
+const chromeComponent = computed(() => (showChrome.value ? AdminLayout : 'div'))
 
 async function loadReportMeta(id: number) {
   report.value = (await apiRequest<{ data: Report }>(`/reports/${id}`)).data
@@ -198,7 +202,7 @@ async function exportReport(format: 'csv' | 'excel') {
 </script>
 
 <template>
-  <AdminLayout>
+  <component :is="chromeComponent" :class="showChrome ? '' : 'min-h-screen bg-slate-50 p-6'">
     <div class="max-w-6xl mx-auto flex gap-5">
       <div class="flex-1 min-w-0 space-y-4">
         <div class="flex items-center justify-between flex-wrap gap-2">
@@ -267,5 +271,5 @@ async function exportReport(format: 'csv' | 'excel') {
         </div>
       </aside>
     </div>
-  </AdminLayout>
+  </component>
 </template>

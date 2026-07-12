@@ -845,6 +845,7 @@ class ReportController extends Controller
             'definition.fixed_parameters_enabled'          => 'nullable|array',
             'definition.require_parameter_screen'          => 'nullable|boolean',
             'definition.filter_condition'                  => 'nullable|string|max:1000',
+            'definition.show_header_menu'                  => 'nullable|boolean',
             'definition.template_header_id' => 'nullable|integer|exists:templates,id',
             'definition.template_footer_id' => 'nullable|integer|exists:templates,id',
             'definition.custom_parameters'                 => 'nullable|array',

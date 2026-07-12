@@ -37,6 +37,7 @@ class DefinitionPromptEditor
         $decoded['custom_parameters'] = $existingDefinition['custom_parameters'] ?? [];
         $decoded['require_parameter_screen'] = $existingDefinition['require_parameter_screen'] ?? true;
         $decoded['filter_condition'] = $existingDefinition['filter_condition'] ?? '';
+        $decoded['show_header_menu'] = $existingDefinition['show_header_menu'] ?? true;
         $promptHistory = (array) ($existingDefinition['prompt_history'] ?? []);
         $promptHistory[] = ['text' => $prompt, 'at' => now()->toIso8601String()];
         $decoded['prompt_history'] = $promptHistory;

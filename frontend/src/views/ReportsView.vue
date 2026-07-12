@@ -230,6 +230,10 @@ const editDesc   = ref('')
 // Report-level, plain-language filter/condition — resolved constants + the
 // text are sent to the AI at Run/Preview time to filter the fetched rows.
 const editFilterCondition = ref('')
+// Whether the published/shared report view (/reports/:id/view, /views/:id)
+// shows the app's sidebar/topbar, or renders bare — off gives a clean,
+// standalone page suitable for sharing outside the Studio chrome.
+const editShowHeaderMenu = ref(true)
 const editType   = ref('table')
 const editStatus = ref('draft')
 const editTagsText = ref('')
@@ -494,6 +498,7 @@ async function openReport(r: Report) {
     editName.value   = selected.value.name
     editDesc.value   = selected.value.description ?? ''
     editFilterCondition.value = (def.filter_condition as string) ?? ''
+    editShowHeaderMenu.value = (def.show_header_menu as boolean) ?? true
     editType.value   = selected.value.type
     editStatus.value = selected.value.status
     editTagsText.value = (selected.value.tags ?? []).join(', ')
@@ -543,6 +548,7 @@ function buildDraftDefinition(): Record<string, unknown> {
   definition.template_header_id = editTemplateHeaderId.value
   definition.template_footer_id = editTemplateFooterId.value
   definition.filter_condition = editFilterCondition.value
+  definition.show_header_menu = editShowHeaderMenu.value
   return definition
 }
 
@@ -921,6 +927,7 @@ async function restoreHistory(entry: HistoryEntry) {
   customParamValues.value = Object.fromEntries(customParams.value.map(p => [p.id, p.default_value ?? (p.type === 'checkbox' ? false : '')]))
   requireParamScreen.value = (def.require_parameter_screen as boolean) ?? true
   editFilterCondition.value = (def.filter_condition as string) ?? ''
+  editShowHeaderMenu.value = (def.show_header_menu as boolean) ?? true
   promptHistory.value = (def.prompt_history as PromptHistoryEntry[]) ?? promptHistory.value
   editTemplateHeaderId.value = (def.template_header_id as number) ?? null
   editTemplateFooterId.value = (def.template_footer_id as number) ?? null
@@ -1730,6 +1737,10 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
                   class="w-full text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-airr-300 resize-none disabled:bg-slate-50"></textarea>
                 <p class="text-[10px] text-slate-400 mt-0.5">Plain language — the AI applies it to filter the data when this report is run/previewed.</p>
               </div>
+              <label class="flex items-center gap-2 text-[11px] text-slate-500">
+                <input type="checkbox" v-model="editShowHeaderMenu" :disabled="selected.locked" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" />
+                Show header/menu on published view
+              </label>
               <div>
                 <label class="block text-[11px] text-slate-500 mb-0.5">Definition JSON</label>
                 <textarea v-model="defText" :disabled="selected.locked" rows="8" spellcheck="false"
