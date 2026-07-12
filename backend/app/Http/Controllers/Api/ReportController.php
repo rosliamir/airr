@@ -41,6 +41,10 @@ class ReportController extends Controller
         $this->authorizeReport($request, $report, 'run');
         $params = (array) $request->input('params', []);
         $customParams = (array) $request->input('custom_params', []);
+        // The Filter/condition (AI-applied) is a Preview-only concept — a
+        // plain Run is just "show me the data as-is". The Preview modal
+        // explicitly opts in via apply_filter=true.
+        $applyFilter = $request->boolean('apply_filter');
         $this->applyDraftDefinition($request, $report);
 
         $data = ['columns' => [], 'rows' => []];
@@ -58,11 +62,14 @@ class ReportController extends Controller
                 return $this->sendError(503, 'DATASOURCE_UNAVAILABLE', 'Could not reach the data source: ' . $e->getMessage());
             }
             $data = ['columns' => $result['columns'] ?? [], 'rows' => $result['rows'] ?? []];
-            if (! $isFiltered) {
+            $hasCondition = $applyFilter && trim((string) ($report->definition['filter_condition'] ?? '')) !== '';
+            if (! $isFiltered && ! $hasCondition) {
                 $warning = 'No parameter value was supplied to filter this dataset, so only a limited sample (20 rows) is shown. '
                     . 'Fill in at least one parameter value to retrieve the complete, filtered result.';
             }
-            $data['rows'] = $this->applyConditionFilters($report, $data['rows'], $resolver, $ai, $customParams);
+            if ($applyFilter) {
+                $data['rows'] = $this->applyConditionFilters($report, $data['rows'], $resolver, $ai, $customParams);
+            }
         }
 
         $html = $this->renderer->render($report, $data);
@@ -112,7 +119,12 @@ class ReportController extends Controller
                 . "\n\nCondition (a row must satisfy this to be kept):\n{$condition}"
                 . "\n\nReturn ONLY a JSON array of the 0-based indices of the rows to KEEP — nothing else, no markdown fences, no explanation.";
             $raw = $ai->generate($model, $prompt, [
-                'system' => 'You filter tabular data rows against plain-language conditions. Respond with only a JSON array of integer indices.',
+                'system' => 'You filter tabular data rows against plain-language conditions. '
+                    . 'Dates/times in the condition and in the row values are very often written in different '
+                    . 'formats (dd/mm/yyyy, mm/dd/yyyy, yyyy-mm-dd, with or without time) — always compare them '
+                    . 'by their actual calendar date/time meaning, never by exact string equality. The same '
+                    . 'applies to numbers with different formatting (thousands separators, trailing zeros, '
+                    . 'currency symbols) — compare by numeric value. Respond with only a JSON array of integer indices.',
                 'temperature' => 0,
             ]);
             $indices = $this->extractJsonArrayOfInts($raw);

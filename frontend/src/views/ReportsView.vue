@@ -665,7 +665,7 @@ async function runPreviewModal() {
     let definition: Record<string, unknown> | undefined
     try { definition = buildDraftDefinition() } catch { definition = undefined }
     const res = await apiRequest<{ data: { html: string; row_count: number; warning?: string | null } }>(`/reports/${selected.value.id}/run`, {
-      method: 'POST', body: JSON.stringify({ params: activePreviewParams.value, custom_params: activeCustomParamValues.value, definition }),
+      method: 'POST', body: JSON.stringify({ params: activePreviewParams.value, custom_params: activeCustomParamValues.value, apply_filter: true, definition }),
     })
     previewModalHtml.value = res.data.html
     previewModalRowCount.value = res.data.row_count
