@@ -62,8 +62,11 @@ class ReportController extends Controller
                 return $this->sendError(503, 'DATASOURCE_UNAVAILABLE', 'Could not reach the data source: ' . $e->getMessage());
             }
             $data = ['columns' => $result['columns'] ?? [], 'rows' => $result['rows'] ?? []];
-            $hasCondition = $applyFilter && trim((string) ($report->definition['filter_condition'] ?? '')) !== '';
-            if (! $isFiltered && ! $hasCondition) {
+            // Preview is opted into explicitly (apply_filter) and may be
+            // narrowing the data via a custom parameter + Filter/condition
+            // rather than a dataset parameter — the sample-only warning
+            // doesn't apply there; it's only relevant to a plain Run.
+            if (! $isFiltered && ! $applyFilter) {
                 $warning = 'No parameter value was supplied to filter this dataset, so only a limited sample (20 rows) is shown. '
                     . 'Fill in at least one parameter value to retrieve the complete, filtered result.';
             }

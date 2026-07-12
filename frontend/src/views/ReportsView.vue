@@ -612,6 +612,56 @@ const previewModalWarning = ref('')
 const previewModalExporting = ref<'csv' | 'excel' | null>(null)
 const previewModalStarted = ref(false) // false = show the parameter screen (Run/Cancel); true = show the result
 const previewModalMaximized = ref(false)
+// Moveable/resizable window geometry (ignored while maximized).
+const previewModalX = ref(0)
+const previewModalY = ref(0)
+const previewModalW = ref(960)
+const previewModalH = ref(640)
+let previewDrag: { startX: number; startY: number; startLeft: number; startTop: number } | null = null
+let previewResize: { startX: number; startY: number; startW: number; startH: number } | null = null
+
+function centerPreviewModal() {
+  previewModalW.value = Math.min(960, window.innerWidth - 48)
+  previewModalH.value = Math.min(640, window.innerHeight - 48)
+  previewModalX.value = Math.max(0, (window.innerWidth - previewModalW.value) / 2)
+  previewModalY.value = Math.max(0, (window.innerHeight - previewModalH.value) / 2)
+}
+function startDragPreview(e: MouseEvent) {
+  if (previewModalMaximized.value) return
+  previewDrag = { startX: e.clientX, startY: e.clientY, startLeft: previewModalX.value, startTop: previewModalY.value }
+  window.addEventListener('mousemove', onDragPreviewMove)
+  window.addEventListener('mouseup', onDragPreviewEnd)
+}
+function onDragPreviewMove(e: MouseEvent) {
+  if (!previewDrag) return
+  previewModalX.value = Math.max(0, previewDrag.startLeft + (e.clientX - previewDrag.startX))
+  previewModalY.value = Math.max(0, previewDrag.startTop + (e.clientY - previewDrag.startY))
+}
+function onDragPreviewEnd() {
+  previewDrag = null
+  window.removeEventListener('mousemove', onDragPreviewMove)
+  window.removeEventListener('mouseup', onDragPreviewEnd)
+}
+function startResizePreview(e: MouseEvent) {
+  if (previewModalMaximized.value) return
+  previewResize = { startX: e.clientX, startY: e.clientY, startW: previewModalW.value, startH: previewModalH.value }
+  window.addEventListener('mousemove', onResizePreviewMove)
+  window.addEventListener('mouseup', onResizePreviewEnd)
+}
+function onResizePreviewMove(e: MouseEvent) {
+  if (!previewResize) return
+  previewModalW.value = Math.max(480, previewResize.startW + (e.clientX - previewResize.startX))
+  previewModalH.value = Math.max(320, previewResize.startH + (e.clientY - previewResize.startY))
+}
+function onResizePreviewEnd() {
+  previewResize = null
+  window.removeEventListener('mousemove', onResizePreviewMove)
+  window.removeEventListener('mouseup', onResizePreviewEnd)
+}
+onUnmounted(() => {
+  window.removeEventListener('mousemove', onDragPreviewMove); window.removeEventListener('mouseup', onDragPreviewEnd)
+  window.removeEventListener('mousemove', onResizePreviewMove); window.removeEventListener('mouseup', onResizePreviewEnd)
+})
 
 // Only send params whose checkbox is ticked (fixedParamsEnabled — the same
 // state as the Parameters panel's checkboxes, so ticking there or here is one
@@ -639,6 +689,8 @@ const activeCustomParamValues = computed(() => {
 async function openPreviewModal() {
   if (!selected.value) return
   showPreviewModal.value = true
+  previewModalMaximized.value = false
+  centerPreviewModal()
   previewModalHtml.value = ''
   previewModalError.value = ''
   previewModalWarning.value = ''
@@ -1949,13 +2001,15 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
       </div>
     </div>
 
-    <!-- Preview Mode popup -->
-    <div v-if="showPreviewModal" class="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50"
-      :class="previewModalMaximized ? '' : 'px-4 py-6'" @click.self="exitPreviewModal">
-      <div class="bg-white shadow-xl flex flex-col"
-        :class="previewModalMaximized ? 'w-screen h-screen rounded-none' : 'rounded-2xl w-full max-w-5xl h-full max-h-[90vh]'">
-        <!-- Header -->
-        <div class="shrink-0 flex items-center justify-between px-5 py-3 border-b border-slate-100">
+    <!-- Preview Mode popup — moveable (drag the header) and resizable (drag the
+         bottom-right corner) while not maximized. -->
+    <div v-if="showPreviewModal" class="fixed inset-0 bg-slate-900/40 z-50" @click.self="exitPreviewModal">
+      <div class="bg-white shadow-xl flex flex-col relative"
+        :class="previewModalMaximized ? 'w-screen h-screen rounded-none fixed inset-0' : 'rounded-2xl fixed'"
+        :style="previewModalMaximized ? {} : { left: previewModalX + 'px', top: previewModalY + 'px', width: previewModalW + 'px', height: previewModalH + 'px' }">
+        <!-- Header (drag handle) -->
+        <div class="shrink-0 flex items-center justify-between px-5 py-3 border-b border-slate-100 select-none"
+          :class="previewModalMaximized ? '' : 'cursor-move'" @mousedown="startDragPreview">
           <h3 class="font-bold text-lg">Preview — {{ selected?.name }}</h3>
           <div class="flex items-center gap-3">
             <button @click="previewModalMaximized = !previewModalMaximized" class="text-slate-400 hover:text-slate-600 text-sm" :title="previewModalMaximized ? 'Restore' : 'Maximize'">
@@ -2044,6 +2098,10 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
             </div>
           </div>
         </template>
+        <!-- Resize handle -->
+        <div v-if="!previewModalMaximized" @mousedown.stop="startResizePreview"
+          class="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
+          style="background: linear-gradient(135deg, transparent 50%, #cbd5e1 50%);"></div>
       </div>
     </div>
 
