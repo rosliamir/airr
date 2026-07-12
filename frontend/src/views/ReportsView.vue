@@ -1804,9 +1804,19 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
           <input v-model="paramForm.default_value as string" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
         </div>
         <div v-else-if="['date', 'datetime', 'time'].includes(paramForm.type)">
-          <label class="block text-sm font-medium text-slate-600 mb-1">Default value</label>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-sm font-medium text-slate-600">Default value <span class="font-normal text-slate-400">· optional</span></label>
+            <select v-if="constants.length" @change="insertConstant(($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"
+              class="text-[11px] border border-slate-200 rounded px-1.5 py-0.5 text-slate-500">
+              <option value="">Insert constant…</option>
+              <option v-for="c in constants" :key="c.id" :value="constantToken(c)">{{ c.label || c.key }}</option>
+            </select>
+          </div>
+          <!-- Plain text, not a native date/time picker — leave blank, type a real
+               value, or insert a constant token like {{SYSTEM:DATE}}; a native
+               <input type="date"> can't hold either of those. -->
           <input v-model="paramForm.default_value as string"
-            :type="paramForm.type === 'datetime' ? 'datetime-local' : paramForm.type"
+            :placeholder="paramForm.type === 'date' ? 'e.g. 2026-07-12 or {{SYSTEM:DATE}}' : paramForm.type === 'datetime' ? 'e.g. 2026-07-12 14:30' : 'e.g. 14:30'"
             class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
         </div>
         <div v-else-if="paramForm.type === 'amount'" class="grid grid-cols-3 gap-2">
@@ -1948,7 +1958,8 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
         <!-- Step 2: result, after Run -->
         <template v-else>
           <div class="flex-1 flex flex-col overflow-hidden min-h-0">
-            <div class="shrink-0 px-5 py-2 border-b border-slate-100">
+            <!-- Nothing to go back to when the parameter screen itself is off. -->
+            <div v-if="requireParamScreen" class="shrink-0 px-5 py-2 border-b border-slate-100">
               <button @click="previewModalStarted = false" class="text-xs font-medium text-slate-500 hover:text-slate-700">← Back to parameters</button>
             </div>
             <!-- Result -->
