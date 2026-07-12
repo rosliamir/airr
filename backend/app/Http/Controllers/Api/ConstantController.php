@@ -187,7 +187,7 @@ class ConstantController extends Controller
             'data_column'    => $c->data_column,
             'formula'        => $c->formula,
             'image_url'      => $c->image_path ? route('constants.image', $c->id) : null,
-            'placeholder'    => '{{' . strtoupper($c->scope) . ':' . $c->key . '}}',
+            'placeholder'    => '{{' . strtoupper($c->scope) . '|' . $c->key . '}}',
         ], fn ($v) => $v !== null);
     }
 

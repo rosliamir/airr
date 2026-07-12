@@ -191,7 +191,7 @@ async function loadConstants() {
   } catch { /* non-critical — constants picker just stays empty */ }
 }
 function constantToken(c: Constant): string {
-  return `{{${c.scope.toUpperCase()}:${c.key}}}`
+  return `{{${c.scope.toUpperCase()}|${c.key}}}`
 }
 const paraTokenHint = '{{PARA|name}}'
 function paraToken(name: string): string {

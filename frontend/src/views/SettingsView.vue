@@ -118,11 +118,16 @@ const REGIONAL_FIELDS = [
 
 const tokenBraceHint = '{{...}}'
 const VARIABLE_HELP = [
-  { token: '{{SYSTEM:KEY}}', title: 'System constant', description: 'Built-in values like DATE, TIME, DATETIME, YEAR, USER_NAME, USER_EMAIL, or a custom System constant defined in the Constants tab.', example: '{{SYSTEM:DATE}} → 12/07/2026' },
-  { token: '{{GLOBAL:KEY}}', title: 'Global constant', description: 'A custom constant defined in the Constants tab, shared across every project (e.g. a fixed rate or company name).', example: '{{GLOBAL:SST}} → 6' },
-  { token: '{{PROJECT:KEY}}', title: 'Project constant', description: 'A constant scoped to the current project only — same key can hold a different value per project.', example: '{{PROJECT:BRANCH_NAME}} → PBT Kuala Lumpur' },
+  { token: '{{SYSTEM|KEY}}', title: 'System constant', description: 'Built-in values: DATE, TIME, DATETIME, YEAR, USER_NAME, USER_EMAIL, USER_TYPE, ROLES, REPORT_NAME — or a custom System constant defined in the Constants tab. The older {{SYSTEM:KEY}} colon form still works on existing content.', example: '{{SYSTEM|DATE}} → 12/07/2026' },
+  { token: '{{GLOBAL|KEY}}', title: 'Global constant', description: 'A custom constant defined in the Constants tab, shared across every project (e.g. a fixed rate or company name).', example: '{{GLOBAL|SST}} → 6' },
+  { token: '{{PROJECT|KEY}}', title: 'Project constant', description: 'A constant scoped to the current project only — same key can hold a different value per project.', example: '{{PROJECT|BRANCH_NAME}} → PBT Kuala Lumpur' },
   { token: '{{PARA|name}}', title: 'Report parameter', description: 'The runtime value of one of the report’s own custom parameters, referenced by its Name (set when editing the parameter). Usable anywhere tokens are resolved for that report — most commonly inside the Filter/condition field.', example: '{{PARA|min_amount}} → 100' },
   { token: '{{DATA:source:dataset|field}}', title: 'Data field lookup', description: 'An ad-hoc reference to a field’s value from any Data Source + Dataset, by name. Interim implementation: resolves against the first row returned (no join key yet) — best for single-row lookup datasets.', example: '{{DATA:PBT-MPKL:PBT-MPKL|tarikh_resit}}' },
+  { token: '{{API:api name|field}}', title: 'API field lookup', description: 'Calls an API-type Data Source directly (a single GET to its base URL — no Dataset needed) and pulls one field out of the JSON response.', example: '{{API:Weather API|temperature}}' },
+  { token: '{{SYSTEM:MENU|menu name}}', title: 'Menu route', description: 'Resolves to the route/path of a navigation menu item, by its label.', example: '{{SYSTEM:MENU|Reports}} → /reports' },
+  { token: '{{SYSTEM:PROJECT|project name}}', title: 'Project code lookup', description: 'Resolves to the code of a project, by its name — for referencing a project OTHER than the current one (use {{PROJECT|KEY}} for the current project’s own constants).', example: '{{SYSTEM:PROJECT|PBT}} → PBT' },
+  { token: '{{SYSTEM:TEMPLATE|template name}}', title: 'Template content lookup', description: 'Inserts a template’s content (body, falling back to header), by the template’s name.', example: '{{SYSTEM:TEMPLATE|para header kutipan}}' },
+  { token: '{{SYSTEM:API|api name:field}}', title: 'API field lookup (SYSTEM form)', description: 'Same as {{API:api name|field}} above, nested under SYSTEM — api name and field are colon-separated.', example: '{{SYSTEM:API|Weather API:temperature}}' },
 ]
 
 const LIMIT_LABELS: Record<string, string> = {

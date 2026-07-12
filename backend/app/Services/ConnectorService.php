@@ -366,6 +366,18 @@ class ConnectorService
         ) + ['status' => $res->status()];
     }
 
+    // Simple GET against an API-type DataSource's base URL — used to resolve
+    // {{API:name|field}} / {{SYSTEM:API|name:field}} constant tokens, which
+    // reference an ad-hoc output field rather than running a bound Dataset.
+    public function callApiSource(DataSource $source): array
+    {
+        $cfg = $source->config ?? [];
+        $res = $this->http($source)->get(rtrim($cfg['base_url'] ?? '', '/'));
+        $json = $res->json();
+
+        return is_array($json) ? $json : [];
+    }
+
     private function http(DataSource $source)
     {
         $cfg = $source->config ?? [];

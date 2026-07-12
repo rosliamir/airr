@@ -5,11 +5,24 @@ namespace App\Services;
 use App\Models\Constant;
 use App\Models\Dataset;
 use App\Models\DataSource;
+use App\Models\Menu;
+use App\Models\Project;
+use App\Models\Template;
 use App\Models\User;
 
-// Resolves {{SYSTEM:KEY}}, {{GLOBAL:KEY}}, {{PROJECT:KEY}}, {{DATA:KEY}},
-// {{PARA|name}}, {{DATA:source:dataset|field}} placeholders in template
-// sections, report definitions, and datasource queries.
+// Resolves variable tokens used in template sections, report definitions, and
+// datasource queries:
+//   {{SYSTEM|KEY}}, {{GLOBAL|KEY}}, {{PROJECT|KEY}}         — constant lookup
+//   {{PARA|name}}                                            — report's own custom parameter
+//   {{DATA:source:dataset|field}}                            — ad-hoc dataset field lookup
+//   {{API:api name|field}}                                   — ad-hoc API field lookup
+//   {{SYSTEM:MENU|menu name}}                                — a menu's route
+//   {{SYSTEM:PROJECT|project name}}                          — a project's code
+//   {{SYSTEM:TEMPLATE|template name}}                        — a template's content
+//   {{SYSTEM:API|api name:field}}                            — same as {{API:...|...}}
+// The older {{SYSTEM:KEY}} / {{GLOBAL:KEY}} / {{PROJECT:KEY}} colon form is
+// still accepted for backward compatibility with content saved before the
+// pipe form was introduced.
 class ConstantResolver
 {
     public function __construct(protected ConnectorService $connector) {}
@@ -19,9 +32,17 @@ class ConstantResolver
      *                                          constants (report-render time). Null outside that context.
      * @param  array<string,mixed>|null  $customParams  Report custom-parameter runtime values,
      *                                          keyed by parameter name — resolves {{PARA|name}}.
+     * @param  string|null  $reportName  The current report's name — resolves {{SYSTEM|REPORT_NAME}}.
      */
-    public function resolve(string $text, ?int $projectId = null, ?User $user = null, ?array $row = null, ?array $customParams = null): string
+    public function resolve(string $text, ?int $projectId = null, ?User $user = null, ?array $row = null, ?array $customParams = null, ?string $reportName = null): string
     {
+        // Normalize the pipe form of the three plain constant scopes to the
+        // legacy colon form the rest of this method already handles — keeps
+        // one implementation for both spellings. Only touches the SIMPLE
+        // {{SCOPE|KEY}} shape; qualified forms like {{SYSTEM:MENU|name}}
+        // already start with a colon and are untouched.
+        $text = preg_replace('/\{\{(SYSTEM|GLOBAL|PROJECT)\|([A-Z0-9_]+)\}\}/', '{{$1:$2}}', $text);
+
         // {{PARA|name}} — a report's own custom parameter, referenced as a variable.
         if ($customParams) {
             $text = preg_replace_callback('/\{\{PARA\|([A-Za-z0-9_]+)\}\}/', function ($m) use ($customParams) {
@@ -38,9 +59,21 @@ class ConstantResolver
             return $this->resolveDataField(trim($m[1]), trim($m[2]), trim($m[3]));
         }, $text);
 
+        // {{API:api name|field}} — an ad-hoc reference to one field of an API-type
+        // data source's response (single GET to its base URL, no dataset needed).
+        $text = preg_replace_callback('/\{\{API:([^{}|]+)\|([^{}]+)\}\}/', function ($m) {
+            return $this->resolveApiField(trim($m[1]), trim($m[2]));
+        }, $text);
+
+        // {{SYSTEM:MENU|menu name}}, {{SYSTEM:PROJECT|project name}},
+        // {{SYSTEM:TEMPLATE|template name}}, {{SYSTEM:API|api name:field}}
+        $text = preg_replace_callback('/\{\{SYSTEM:(MENU|PROJECT|TEMPLATE|API)\|([^{}]+)\}\}/', function ($m) {
+            return $this->resolveSystemSub($m[1], trim($m[2]));
+        }, $text);
+
         // SYSTEM constants
         $systemConstants = Constant::where('scope', 'system')->get()->keyBy('key');
-        $text = preg_replace_callback('/\{\{SYSTEM:([A-Z0-9_]+)(?::([^}]*))?\}\}/', function ($m) use ($user, $systemConstants, $projectId, $row) {
+        $text = preg_replace_callback('/\{\{SYSTEM:([A-Z0-9_]+)(?::([^}]*))?\}\}/', function ($m) use ($user, $systemConstants, $projectId, $row, $reportName) {
             $key    = $m[1];
             $format = $m[2] ?? null;
             $constant = $systemConstants->get($key);
@@ -63,6 +96,9 @@ class ConstantResolver
                 'YEAR'          => now()->format($format ?? 'Y'),
                 'USER_NAME'     => $user?->name ?? '',
                 'USER_EMAIL'    => $user?->email ?? '',
+                'USER_TYPE'     => $user?->user_type ?? '',
+                'ROLES'         => $user ? $user->roles()->pluck('name')->implode(', ') : '',
+                'REPORT_NAME'   => $reportName ?? '',
                 'PAGE'          => '{{PAGE}}', // kept for PDF renderer
                 'TOTAL_PAGE_NO' => '{{TOTAL_PAGE_NO}}', // kept for PDF renderer
                 default         => $constant?->value ?? '',
@@ -150,6 +186,48 @@ class ConstantResolver
             $result = $this->connector->run($dataset, [], 1, 1);
 
             return (string) ($result['rows'][0][$fieldName] ?? '');
+        } catch (\Throwable) {
+            return '';
+        }
+    }
+
+    private function resolveApiField(string $apiName, string $field): string
+    {
+        try {
+            $source = DataSource::where('name', $apiName)->whereIn('type', DataSource::API_TYPES)->first();
+            if (! $source) {
+                return '';
+            }
+            $json = $this->connector->callApiSource($source);
+
+            return (string) ($json[$field] ?? '');
+        } catch (\Throwable) {
+            return '';
+        }
+    }
+
+    private function resolveSystemSub(string $subtype, string $value): string
+    {
+        try {
+            switch ($subtype) {
+                case 'MENU':
+                    return (string) (Menu::where('label', $value)->first()?->route ?? '');
+                case 'PROJECT':
+                    return (string) (Project::where('name', $value)->first()?->code ?? '');
+                case 'TEMPLATE':
+                    $template = Template::where('name', $value)->first();
+
+                    return (string) ($template?->body ?: $template?->header ?: '');
+                case 'API':
+                    if (! str_contains($value, ':')) {
+                        return '';
+                    }
+                    [$apiName, $field] = array_map('trim', explode(':', $value, 2));
+
+                    return $this->resolveApiField($apiName, $field);
+                default:
+                    return '';
+            }
         } catch (\Throwable) {
             return '';
         }

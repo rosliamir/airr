@@ -44,10 +44,11 @@ class ReportRenderer
         // their literal DB value once per column (not per row, they're row-independent).
         $projectId = $report->project_id ?? null;
         $user = Auth::user();
+        $reportName = $report->name;
 
-        return array_map(function ($c) use ($projectId, $user) {
+        return array_map(function ($c) use ($projectId, $user, $reportName) {
             if ($c['calc']) {
-                $c['calc'] = $this->constants->resolve($c['calc'], $projectId, $user);
+                $c['calc'] = $this->constants->resolve($c['calc'], $projectId, $user, null, null, $reportName);
             }
 
             return $c;
@@ -431,8 +432,8 @@ class ReportRenderer
         $projectId = $report->project_id ?? null;
         $user = Auth::user();
 
-        $headerHtml = ($enabled['template_header'] ?? true) ? $this->templateSectionHtml($def['template_header_id'] ?? null, ['header', 'page_header'], $projectId, $user) : '';
-        $footerHtml = ($enabled['template_footer'] ?? true) ? $this->templateSectionHtml($def['template_footer_id'] ?? null, ['footer', 'page_footer'], $projectId, $user) : '';
+        $headerHtml = ($enabled['template_header'] ?? true) ? $this->templateSectionHtml($def['template_header_id'] ?? null, ['header', 'page_header'], $projectId, $user, $report->name) : '';
+        $footerHtml = ($enabled['template_footer'] ?? true) ? $this->templateSectionHtml($def['template_footer_id'] ?? null, ['footer', 'page_footer'], $projectId, $user, $report->name) : '';
 
         return '<div class="airr-report space-y-3">'
             . ($headerHtml !== '' ? '<div class="airr-report-header">' . $headerHtml . '</div>' : '')
@@ -445,7 +446,7 @@ class ReportRenderer
     // Pull the chosen Template's header/footer HTML (first non-empty field of
     // the given fallback list) and resolve any {{SYSTEM:...}}/{{GLOBAL:...}}/
     // {{PROJECT:...}} constants inside it before it's embedded in the output.
-    private function templateSectionHtml(?int $templateId, array $fields, ?int $projectId, $user): string
+    private function templateSectionHtml(?int $templateId, array $fields, ?int $projectId, $user, ?string $reportName = null): string
     {
         if (! $templateId) {
             return '';
@@ -456,7 +457,7 @@ class ReportRenderer
         }
         foreach ($fields as $field) {
             if (! empty($template->{$field})) {
-                return $this->constants->resolve((string) $template->{$field}, $projectId, $user);
+                return $this->constants->resolve((string) $template->{$field}, $projectId, $user, null, null, $reportName);
             }
         }
 

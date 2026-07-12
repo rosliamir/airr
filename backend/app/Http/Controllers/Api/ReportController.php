@@ -104,7 +104,7 @@ class ReportController extends Controller
         if ($condition === '') {
             return $rows;
         }
-        $condition = $this->constants->resolve($condition, $report->project_id ?? null, Auth::user(), null, $customParams);
+        $condition = $this->constants->resolve($condition, $report->project_id ?? null, Auth::user(), null, $customParams, $report->name);
 
         try {
             $model = $resolver->model('generation');
