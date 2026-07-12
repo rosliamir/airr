@@ -3,18 +3,41 @@
 namespace App\Services;
 
 use App\Models\Constant;
+use App\Models\Dataset;
+use App\Models\DataSource;
 use App\Models\User;
 
-// Resolves {{SYSTEM:KEY}}, {{GLOBAL:KEY}}, {{PROJECT:KEY}}, {{DATA:KEY}} placeholders
-// in template sections, report definitions, and datasource queries.
+// Resolves {{SYSTEM:KEY}}, {{GLOBAL:KEY}}, {{PROJECT:KEY}}, {{DATA:KEY}},
+// {{PARA|name}}, {{DATA:source:dataset|field}} placeholders in template
+// sections, report definitions, and datasource queries.
 class ConstantResolver
 {
+    public function __construct(protected ConnectorService $connector) {}
+
     /**
      * @param  array<string,mixed>|null  $row  Row/parameter context used to resolve DATA-type
      *                                          constants (report-render time). Null outside that context.
+     * @param  array<string,mixed>|null  $customParams  Report custom-parameter runtime values,
+     *                                          keyed by parameter name — resolves {{PARA|name}}.
      */
-    public function resolve(string $text, ?int $projectId = null, ?User $user = null, ?array $row = null): string
+    public function resolve(string $text, ?int $projectId = null, ?User $user = null, ?array $row = null, ?array $customParams = null): string
     {
+        // {{PARA|name}} — a report's own custom parameter, referenced as a variable.
+        if ($customParams) {
+            $text = preg_replace_callback('/\{\{PARA\|([A-Za-z0-9_]+)\}\}/', function ($m) use ($customParams) {
+                return (string) ($customParams[$m[1]] ?? '');
+            }, $text);
+        }
+
+        // {{DATA:source_name:dataset_name|field_name}} — an ad-hoc reference to a field
+        // from ANY dataset (not just the report's own), by data source + dataset name.
+        // Interim implementation: resolves to that field's value on the FIRST row
+        // returned (no join key) — good enough for single-row lookup datasets; a real
+        // join/key-based lookup is future work.
+        $text = preg_replace_callback('/\{\{DATA:([^:{}|]+):([^{}|]+)\|([^{}]+)\}\}/', function ($m) {
+            return $this->resolveDataField(trim($m[1]), trim($m[2]), trim($m[3]));
+        }, $text);
+
         // SYSTEM constants
         $systemConstants = Constant::where('scope', 'system')->get()->keyBy('key');
         $text = preg_replace_callback('/\{\{SYSTEM:([A-Z0-9_]+)(?::([^}]*))?\}\}/', function ($m) use ($user, $systemConstants, $projectId, $row) {
@@ -111,6 +134,25 @@ class ConstantResolver
         }
 
         return (string) $result;
+    }
+
+    private function resolveDataField(string $sourceName, string $datasetName, string $fieldName): string
+    {
+        try {
+            $source = DataSource::where('name', $sourceName)->first();
+            if (! $source) {
+                return '';
+            }
+            $dataset = Dataset::where('data_source_id', $source->id)->where('name', $datasetName)->first();
+            if (! $dataset) {
+                return '';
+            }
+            $result = $this->connector->run($dataset, [], 1, 1);
+
+            return (string) ($result['rows'][0][$fieldName] ?? '');
+        } catch (\Throwable) {
+            return '';
+        }
     }
 
     private function imageTag(Constant $constant): string

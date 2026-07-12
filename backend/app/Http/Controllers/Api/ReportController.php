@@ -40,6 +40,7 @@ class ReportController extends Controller
     {
         $this->authorizeReport($request, $report, 'run');
         $params = (array) $request->input('params', []);
+        $customParams = (array) $request->input('custom_params', []);
         $this->applyDraftDefinition($request, $report);
 
         $data = ['columns' => [], 'rows' => []];
@@ -61,7 +62,7 @@ class ReportController extends Controller
                 $warning = 'No parameter value was supplied to filter this dataset, so only a limited sample (20 rows) is shown. '
                     . 'Fill in at least one parameter value to retrieve the complete, filtered result.';
             }
-            $data['rows'] = $this->applyConditionFilters($report, $data['rows'], $resolver, $ai);
+            $data['rows'] = $this->applyConditionFilters($report, $data['rows'], $resolver, $ai, $customParams);
         }
 
         $html = $this->renderer->render($report, $data);
@@ -93,7 +94,7 @@ class ReportController extends Controller
     // rows satisfy it. Best-effort: if there's no condition set, or the AI
     // call fails or returns something unusable, the original rows are
     // returned unfiltered rather than failing the whole run.
-    private function applyConditionFilters(Report $report, array $rows, ModelResolver $resolver, AiProvider $ai): array
+    private function applyConditionFilters(Report $report, array $rows, ModelResolver $resolver, AiProvider $ai, array $customParams = []): array
     {
         if (! $rows) {
             return $rows;
@@ -103,7 +104,7 @@ class ReportController extends Controller
         if ($condition === '') {
             return $rows;
         }
-        $condition = $this->constants->resolve($condition, $report->project_id ?? null, Auth::user());
+        $condition = $this->constants->resolve($condition, $report->project_id ?? null, Auth::user(), null, $customParams);
 
         try {
             $model = $resolver->model('generation');
@@ -149,8 +150,9 @@ class ReportController extends Controller
     public function exportFile(Request $request, Report $report, ModelResolver $resolver, AiProvider $ai): \Symfony\Component\HttpFoundation\Response
     {
         $this->authorizeReport($request, $report, 'run');
-        $data = $request->validate(['format' => 'required|in:csv,excel', 'params' => 'nullable|array', 'definition' => 'nullable|array']);
+        $data = $request->validate(['format' => 'required|in:csv,excel', 'params' => 'nullable|array', 'custom_params' => 'nullable|array', 'definition' => 'nullable|array']);
         $params = (array) ($data['params'] ?? []);
+        $customParams = (array) ($data['custom_params'] ?? []);
         $this->applyDraftDefinition($request, $report);
 
         $tableData = ['columns' => [], 'rows' => []];
@@ -161,7 +163,7 @@ class ReportController extends Controller
                 return $this->sendError(503, 'DATASOURCE_UNAVAILABLE', 'Could not reach the data source: ' . $e->getMessage());
             }
             $tableData = ['columns' => $result['columns'] ?? [], 'rows' => $result['rows'] ?? []];
-            $tableData['rows'] = $this->applyConditionFilters($report, $tableData['rows'], $resolver, $ai);
+            $tableData['rows'] = $this->applyConditionFilters($report, $tableData['rows'], $resolver, $ai, $customParams);
         }
 
         $table = $this->renderer->tabularData($report, $tableData);
@@ -1010,6 +1012,7 @@ SYSTEM;
             'definition.custom_parameters'                 => 'nullable|array',
             'definition.custom_parameters.*.id'             => 'nullable|string|max:60',
             'definition.custom_parameters.*.title'          => 'required_with:definition.custom_parameters|string|max:160',
+            'definition.custom_parameters.*.name'           => 'required_with:definition.custom_parameters|string|max:60|regex:/^[A-Za-z0-9_]+$/',
             'definition.custom_parameters.*.type'           => ['required_with:definition.custom_parameters', Rule::in(['text', 'dropdown', 'checkbox', 'radio', 'date', 'datetime', 'time', 'amount'])],
             'definition.custom_parameters.*.default_value'  => 'nullable',
             'definition.custom_parameters.*.min'            => 'nullable|numeric',

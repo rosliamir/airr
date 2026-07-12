@@ -22,6 +22,9 @@ type Report = {
 type TemplateOpt = { id: number; name: string }
 type CustomParam = {
   id: string; title: string
+  // Machine-safe key used as the {{PARA|name}} variable elsewhere (filter
+  // conditions, etc.) — letters/digits/underscore only, required.
+  name: string
   type: 'text' | 'dropdown' | 'checkbox' | 'radio' | 'date' | 'datetime' | 'time' | 'amount'
   default_value?: string | boolean | null; options?: string[]
   min?: number | null; max?: number | null
@@ -171,7 +174,7 @@ const customParams = ref<CustomParam[]>([])
 const customParamValues = ref<Record<string, string | boolean>>({})
 const showParamModal = ref(false)
 const editingParam = ref<CustomParam | null>(null)
-const paramForm = ref<CustomParam>({ id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true })
+const paramForm = ref<CustomParam>({ id: '', title: '', name: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true })
 const paramOptionsText = ref('') // comma-separated editor for dropdown/radio options (JSON source)
 const paramOptionsJsonError = ref('')
 const datasetsForParam = computed(() => allDatasets.value.filter(d => d.data_source_id === paramForm.value.data_source_id))
@@ -189,6 +192,27 @@ async function loadConstants() {
 }
 function constantToken(c: Constant): string {
   return `{{${c.scope.toUpperCase()}:${c.key}}}`
+}
+const paraTokenHint = '{{PARA|name}}'
+function paraToken(name: string): string {
+  return `{{PARA|${name}}}`
+}
+function slugifyParamName(title: string): string {
+  return title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'param'
+}
+function onParamTitleInput() {
+  if (!paramForm.value.name) paramForm.value.name = slugifyParamName(paramForm.value.title)
+}
+// Backfill `name` for custom parameters saved before it was required, so
+// older reports keep working — derived from title, deduped if it collides.
+function backfillParamNames(params: CustomParam[]): CustomParam[] {
+  const used = new Set<string>()
+  return params.map(p => {
+    let name = p.name || slugifyParamName(p.title)
+    while (used.has(name)) name = `${name}_2`
+    used.add(name)
+    return { ...p, name }
+  })
 }
 function insertConstant(token: string) {
   if (!token) return
@@ -486,7 +510,7 @@ async function openReport(r: Report) {
     addTemplateId.value = null
     testConnResult.value = ''
     fixedParamsEnabled.value = (def.fixed_parameters_enabled as Record<string, boolean>) ?? {}
-    customParams.value = (def.custom_parameters as CustomParam[]) ?? []
+    customParams.value = backfillParamNames((def.custom_parameters as CustomParam[]) ?? [])
     customParamValues.value = Object.fromEntries(customParams.value.map(p => [p.id, p.default_value ?? (p.type === 'checkbox' ? false : '')]))
     requireParamScreen.value = (def.require_parameter_screen as boolean) ?? true
     // seed role grants
@@ -604,6 +628,13 @@ const activePreviewParams = computed(() => {
 // screen — whatever's enabled in the editor's Parameters panel, nothing more.
 const enabledDatasetParams = computed(() => (boundDataset.value?.parameters ?? []).filter(p => fixedParamsEnabled.value[p.name] ?? true))
 const enabledCustomParams = computed(() => customParams.value.filter(p => p.enabled))
+// Runtime custom parameter values keyed by name — resolves {{PARA|name}} tokens
+// (e.g. in the report's filter/condition) server-side.
+const activeCustomParamValues = computed(() => {
+  const out: Record<string, string | boolean> = {}
+  for (const p of enabledCustomParams.value) out[p.name] = customParamValues.value[p.id] ?? ''
+  return out
+})
 
 async function openPreviewModal() {
   if (!selected.value) return
@@ -634,7 +665,7 @@ async function runPreviewModal() {
     let definition: Record<string, unknown> | undefined
     try { definition = buildDraftDefinition() } catch { definition = undefined }
     const res = await apiRequest<{ data: { html: string; row_count: number; warning?: string | null } }>(`/reports/${selected.value.id}/run`, {
-      method: 'POST', body: JSON.stringify({ params: activePreviewParams.value, definition }),
+      method: 'POST', body: JSON.stringify({ params: activePreviewParams.value, custom_params: activeCustomParamValues.value, definition }),
     })
     previewModalHtml.value = res.data.html
     previewModalRowCount.value = res.data.row_count
@@ -663,7 +694,7 @@ async function exportPreviewModal(format: 'csv' | 'excel') {
     const res = await fetch(`${(import.meta as { env: { VITE_API_BASE_URL?: string } }).env.VITE_API_BASE_URL ?? ''}/api/reports/${selected.value.id}/export-file`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${localStorage.getItem('airr_token') ?? ''}` },
-      body: JSON.stringify({ format, params: activePreviewParams.value, definition: (() => { try { return buildDraftDefinition() } catch { return undefined } })() }),
+      body: JSON.stringify({ format, params: activePreviewParams.value, custom_params: activeCustomParamValues.value, definition: (() => { try { return buildDraftDefinition() } catch { return undefined } })() }),
     })
     if (!res.ok) {
       const json = await res.json().catch(() => null)
@@ -747,7 +778,7 @@ async function run() {
   busy.value = true; runError.value = ''; runWarning.value = ''; preview.value = ''
   try {
     const res = await apiRequest<{ data: { html: string; row_count: number; warning?: string | null } }>(`/reports/${selected.value.id}/run`, {
-      method: 'POST', body: JSON.stringify({ params: runParams.value }),
+      method: 'POST', body: JSON.stringify({ params: runParams.value, custom_params: activeCustomParamValues.value }),
     })
     preview.value  = res.data.html
     rowCount.value = res.data.row_count
@@ -819,7 +850,7 @@ async function restoreHistory(entry: HistoryEntry) {
   // snapshot here, otherwise save() clobbers the restored version's parameters
   // with whatever was left in memory from before the restore.
   fixedParamsEnabled.value = (def.fixed_parameters_enabled as Record<string, boolean>) ?? {}
-  customParams.value = (def.custom_parameters as CustomParam[]) ?? []
+  customParams.value = backfillParamNames((def.custom_parameters as CustomParam[]) ?? [])
   customParamValues.value = Object.fromEntries(customParams.value.map(p => [p.id, p.default_value ?? (p.type === 'checkbox' ? false : '')]))
   requireParamScreen.value = (def.require_parameter_screen as boolean) ?? true
   editFilterCondition.value = (def.filter_condition as string) ?? ''
@@ -898,7 +929,7 @@ function toggleAllGrant(field: 'view' | 'edit' | 'run') {
 // ── Report-level parameters ──────────────────────────────────────────────────
 function openAddParam() {
   editingParam.value = null
-  paramForm.value = { id: '', title: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true }
+  paramForm.value = { id: '', title: '', name: '', type: 'text', default_value: '', options: [], min: null, max: null, source_type: 'datasource', data_source_id: null, dataset_id: null, data_column: null, remark: '', enabled: true }
   paramOptionsText.value = ''
   paramOptionsJsonError.value = ''
   loadConstants()
@@ -913,7 +944,7 @@ function openEditParam(p: CustomParam) {
   showParamModal.value = true
 }
 function saveParam() {
-  if (!paramForm.value.title) return
+  if (!paramForm.value.title || !paramForm.value.name) return
   const isList = ['dropdown', 'radio', 'checkbox'].includes(paramForm.value.type)
   if (isList && paramForm.value.source_type === 'json') {
     try {
@@ -1795,7 +1826,13 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
         <h2 class="font-semibold text-slate-800">{{ editingParam ? 'Edit Parameter' : 'Add Parameter' }}</h2>
         <div>
           <label class="block text-sm font-medium text-slate-600 mb-1">Title</label>
-          <input v-model="paramForm.title" class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
+          <input v-model="paramForm.title" @input="onParamTitleInput"
+            class="w-full rounded-lg border border-slate-200 px-3 py-2 focus:ring-2 focus:ring-airr-300 outline-none" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Name <span class="text-slate-400 font-normal">· used as the {{ paraTokenHint }} variable</span></label>
+          <input v-model="paramForm.name" placeholder="e.g. tarikh_resit" class="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm focus:ring-2 focus:ring-airr-300 outline-none" />
+          <p v-if="paramForm.name" class="text-[10px] text-slate-400 mt-1">Variable: <code class="text-slate-600">{{ paraToken(paramForm.name) }}</code></p>
         </div>
         <div>
           <label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
@@ -1905,7 +1942,7 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
         </label>
         <div class="flex justify-end gap-2 pt-1">
           <button @click="showParamModal = false" class="text-sm text-slate-500 px-3 py-2">Cancel</button>
-          <button @click="saveParam" :disabled="!paramForm.title" class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-4 py-2 disabled:opacity-50">
+          <button @click="saveParam" :disabled="!paramForm.title || !paramForm.name" class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-4 py-2 disabled:opacity-50">
             Save
           </button>
         </div>

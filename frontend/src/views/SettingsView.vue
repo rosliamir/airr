@@ -27,7 +27,7 @@ type AiConfig = {
 const PROVIDER_LABELS: Record<string, string> = { ollama: 'Ollama', openai: 'OpenAI', claude: 'Claude' }
 type AiHealth = { provider: string; reachable: boolean; models: { name: string }[] }
 
-const tab = ref<'regional' | 'lookup' | 'ai' | 'constants' | 'subscription' | 'about'>('regional')
+const tab = ref<'regional' | 'lookup' | 'ai' | 'constants' | 'help' | 'subscription' | 'about'>('regional')
 const constantsScope = ref<'system' | 'global'>('system')
 
 // --- Lookups (M14): reference values that feed dropdowns (user_type, project_type, …) ---
@@ -114,6 +114,15 @@ const REGIONAL_FIELDS = [
   { key: 'date_format', label: 'Date format' },
   { key: 'number_format', label: 'Number format' },
   { key: 'data_residency', label: 'Data residency' },
+]
+
+const tokenBraceHint = '{{...}}'
+const VARIABLE_HELP = [
+  { token: '{{SYSTEM:KEY}}', title: 'System constant', description: 'Built-in values like DATE, TIME, DATETIME, YEAR, USER_NAME, USER_EMAIL, or a custom System constant defined in the Constants tab.', example: '{{SYSTEM:DATE}} → 12/07/2026' },
+  { token: '{{GLOBAL:KEY}}', title: 'Global constant', description: 'A custom constant defined in the Constants tab, shared across every project (e.g. a fixed rate or company name).', example: '{{GLOBAL:SST}} → 6' },
+  { token: '{{PROJECT:KEY}}', title: 'Project constant', description: 'A constant scoped to the current project only — same key can hold a different value per project.', example: '{{PROJECT:BRANCH_NAME}} → PBT Kuala Lumpur' },
+  { token: '{{PARA|name}}', title: 'Report parameter', description: 'The runtime value of one of the report’s own custom parameters, referenced by its Name (set when editing the parameter). Usable anywhere tokens are resolved for that report — most commonly inside the Filter/condition field.', example: '{{PARA|min_amount}} → 100' },
+  { token: '{{DATA:source:dataset|field}}', title: 'Data field lookup', description: 'An ad-hoc reference to a field’s value from any Data Source + Dataset, by name. Interim implementation: resolves against the first row returned (no join key yet) — best for single-row lookup datasets.', example: '{{DATA:PBT-MPKL:PBT-MPKL|tarikh_resit}}' },
 ]
 
 const LIMIT_LABELS: Record<string, string> = {
@@ -220,7 +229,7 @@ onMounted(() => {
   <AdminLayout>
     <div class="space-y-5">
       <div class="flex gap-6 border-b border-slate-200">
-        <button v-for="t in (['regional', 'lookup', 'ai', 'constants', 'subscription', 'about'] as const)" :key="t" @click="tab = t"
+        <button v-for="t in (['regional', 'lookup', 'ai', 'constants', 'help', 'subscription', 'about'] as const)" :key="t" @click="tab = t"
           class="pb-2.5 text-sm font-medium border-b-2 -mb-px transition capitalize"
           :class="tab === t ? 'border-airr-500 text-airr-600' : 'border-transparent text-slate-500 hover:text-slate-700'">
           {{ t === 'ai' ? 'AI / Models' : t }}
@@ -254,6 +263,25 @@ onMounted(() => {
           <button @click="constantsScope = 'global'" class="text-xs font-medium px-3 py-1.5 rounded-lg" :class="constantsScope === 'global' ? 'bg-airr-500 text-white' : 'text-slate-500 hover:bg-slate-50'">Global (custom)</button>
         </div>
         <ConstantsPanel :key="constantsScope" :scope="constantsScope" />
+      </div>
+
+      <!-- HELP — variable/token reference -->
+      <div v-else-if="tab === 'help'" class="max-w-3xl space-y-4">
+        <p class="text-sm text-slate-500">
+          These <code class="text-xs bg-slate-100 rounded px-1 py-0.5">{{ tokenBraceHint }}</code> tokens can be used
+          inside report definitions — Templates (header/footer), custom parameter default values, and the
+          report's Filter/condition field — and are resolved before the report is rendered or run.
+        </p>
+        <div class="bg-white rounded-xl border border-slate-100 divide-y divide-slate-100">
+          <div v-for="v in VARIABLE_HELP" :key="v.token" class="p-4">
+            <div class="flex items-baseline gap-3 flex-wrap">
+              <code class="text-sm font-semibold text-airr-600 bg-airr-50 rounded px-1.5 py-0.5">{{ v.token }}</code>
+              <span class="text-sm font-medium text-slate-700">{{ v.title }}</span>
+            </div>
+            <p class="text-sm text-slate-500 mt-1">{{ v.description }}</p>
+            <p class="text-xs text-slate-400 mt-1">Example: <code class="text-slate-500">{{ v.example }}</code></p>
+          </div>
+        </div>
       </div>
 
       <!-- LOOKUP (reference values) -->
