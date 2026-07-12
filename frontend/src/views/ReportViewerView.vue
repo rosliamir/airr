@@ -44,6 +44,11 @@ const promptFile = ref<File | null>(null)
 const promptBusy = ref(false)
 const promptError = ref('')
 const promptHistory = ref<{ text: string; at: string }[]>([])
+// Collapsed to a small toggle button by default — opens into a dockable
+// panel the user can place on any side of the page.
+const promptOpen = ref(false)
+const promptPosition = ref<'top' | 'bottom' | 'left' | 'right'>('right')
+const promptIsVertical = computed(() => promptPosition.value === 'left' || promptPosition.value === 'right')
 
 const saveName = ref('')
 const saveBusy = ref(false)
@@ -168,6 +173,11 @@ async function saveView() {
 function copyShareUrl() {
   if (shareUrl.value) navigator.clipboard?.writeText(shareUrl.value)
 }
+// Always available (unlike the Shareable link row, which only appears once a
+// saved view exists) — copies whatever URL is currently open, report or saved view.
+function copyPageLink() {
+  navigator.clipboard?.writeText(window.location.href)
+}
 
 // ── Print / Export — same as the editor's Preview modal.
 function printReport() {
@@ -203,7 +213,42 @@ async function exportReport(format: 'csv' | 'excel') {
 
 <template>
   <component :is="chromeComponent" :class="showChrome ? '' : 'min-h-screen bg-slate-50 p-6'">
-    <div class="max-w-6xl mx-auto flex gap-5">
+    <div class="max-w-6xl mx-auto flex" :class="promptOpen && !promptIsVertical ? 'flex-col gap-5' : 'gap-5'">
+      <!-- Prompt panel docked left/top comes before the main content -->
+      <aside v-if="promptOpen && (promptPosition === 'left' || promptPosition === 'top')"
+        class="space-y-3" :class="promptIsVertical ? 'w-72 shrink-0' : 'w-full'">
+        <div class="flex items-center justify-between">
+          <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Prompt</p>
+          <div class="flex items-center gap-1">
+            <button v-for="pos in (['top','bottom','left','right'] as const)" :key="pos" @click="promptPosition = pos"
+              :title="`Dock ${pos}`" class="text-[10px] px-1.5 py-0.5 rounded" :class="promptPosition === pos ? 'bg-airr-100 text-airr-600' : 'text-slate-300 hover:text-slate-500'">■</button>
+            <button @click="promptOpen = false" class="text-slate-400 hover:text-slate-600 text-sm ml-1">×</button>
+          </div>
+        </div>
+        <p class="text-[10px] text-slate-400">Tell the AI how this report should look — changes save to your own view, the original report is never touched.</p>
+        <textarea v-model="promptText" rows="4" placeholder='e.g. "remove the email column", "add a running total"'
+          class="w-full text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-airr-300 resize-none"></textarea>
+        <label class="block text-xs text-slate-500 border border-dashed border-slate-200 rounded-lg px-2 py-1.5 text-center cursor-pointer hover:bg-slate-50">
+          {{ promptFile ? promptFile.name : 'Attach file' }}
+          <input type="file" class="hidden" @change="onPromptFileChange" />
+        </label>
+        <div class="flex gap-2">
+          <button @click="clearPrompt" class="text-xs text-slate-500 px-2 py-1.5">Clear</button>
+          <button @click="generateFromPrompt" :disabled="promptBusy || !promptText.trim()"
+            class="flex-1 text-xs font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5 disabled:opacity-50">
+            {{ promptBusy ? 'Generating…' : 'Generate' }}
+          </button>
+        </div>
+        <p v-if="promptError" class="text-xs text-airr-700 bg-airr-50 rounded-lg px-2 py-1.5">{{ promptError }}</p>
+        <div v-if="promptHistory.length" class="pt-2 border-t border-slate-100 space-y-1">
+          <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Previous prompts</p>
+          <button v-for="(p, i) in [...promptHistory].reverse()" :key="i" @click="usePreviousPrompt(p.text)"
+            class="block w-full text-left text-[11px] text-slate-500 hover:bg-slate-50 rounded px-2 py-1 truncate" :title="p.text">
+            {{ p.text }}
+          </button>
+        </div>
+      </aside>
+
       <div class="flex-1 min-w-0 space-y-4">
         <div class="flex items-center justify-between flex-wrap gap-2">
           <div>
@@ -212,10 +257,14 @@ async function exportReport(format: 'csv' | 'excel') {
           </div>
           <div class="flex items-center gap-2">
             <span v-if="rowCount !== null" class="text-xs text-slate-400 mr-1">{{ rowCount }} rows</span>
+            <button @click="copyPageLink" title="Copy link to this page" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5">🔗 Copy link</button>
             <button @click="printReport" :disabled="!html" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5 disabled:opacity-40">Print / PDF</button>
             <button @click="exportReport('csv')" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5">Export CSV</button>
             <button @click="exportReport('excel')" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5">Export Excel</button>
             <button @click="saveView" :disabled="saveBusy" class="text-xs font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5 disabled:opacity-50">{{ saveBusy ? 'Saving…' : 'Save' }}</button>
+            <!-- Collapsed by default — just this toggle button, per request -->
+            <button @click="promptOpen = !promptOpen" title="AI Prompt"
+              class="text-xs font-medium rounded-lg px-3 py-1.5 border" :class="promptOpen ? 'bg-airr-500 text-white border-airr-500' : 'text-airr-600 border-airr-200 hover:bg-airr-50'">✨ AI Prompt</button>
           </div>
         </div>
 
@@ -241,11 +290,17 @@ async function exportReport(format: 'csv' | 'excel') {
         </div>
       </div>
 
-      <!-- Prompt panel — same feature as the report editor's: describe a
-           change in plain language, AI applies it (to this personal saved
-           view, never the source report). -->
-      <aside class="w-72 shrink-0 space-y-3">
-        <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Prompt</p>
+      <!-- Prompt panel docked right/bottom comes after the main content -->
+      <aside v-if="promptOpen && (promptPosition === 'right' || promptPosition === 'bottom')"
+        class="space-y-3" :class="promptIsVertical ? 'w-72 shrink-0' : 'w-full'">
+        <div class="flex items-center justify-between">
+          <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Prompt</p>
+          <div class="flex items-center gap-1">
+            <button v-for="pos in (['top','bottom','left','right'] as const)" :key="pos" @click="promptPosition = pos"
+              :title="`Dock ${pos}`" class="text-[10px] px-1.5 py-0.5 rounded" :class="promptPosition === pos ? 'bg-airr-100 text-airr-600' : 'text-slate-300 hover:text-slate-500'">■</button>
+            <button @click="promptOpen = false" class="text-slate-400 hover:text-slate-600 text-sm ml-1">×</button>
+          </div>
+        </div>
         <p class="text-[10px] text-slate-400">Tell the AI how this report should look — changes save to your own view, the original report is never touched.</p>
         <textarea v-model="promptText" rows="4" placeholder='e.g. "remove the email column", "add a running total"'
           class="w-full text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-airr-300 resize-none"></textarea>
@@ -261,7 +316,6 @@ async function exportReport(format: 'csv' | 'excel') {
           </button>
         </div>
         <p v-if="promptError" class="text-xs text-airr-700 bg-airr-50 rounded-lg px-2 py-1.5">{{ promptError }}</p>
-
         <div v-if="promptHistory.length" class="pt-2 border-t border-slate-100 space-y-1">
           <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Previous prompts</p>
           <button v-for="(p, i) in [...promptHistory].reverse()" :key="i" @click="usePreviousPrompt(p.text)"
