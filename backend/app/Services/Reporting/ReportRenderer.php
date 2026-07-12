@@ -3,6 +3,7 @@
 namespace App\Services\Reporting;
 
 use App\Models\Report;
+use App\Models\Template;
 use App\Services\ConstantResolver;
 use Illuminate\Support\Facades\Auth;
 
@@ -24,13 +25,48 @@ class ReportRenderer
         $rows = $data['rows'] ?? [];
         $columns = $this->resolveColumns($report, $def, $data['columns'] ?? []);
 
-        $body = match ($type) {
-            'grouped' => $this->grouped($def, $columns, $rows),
-            'kpi'     => $this->kpi($def, $rows),
-            default   => $this->table($columns, $rows, $def),
-        };
+        // An attached Template (the report's Template panel — distinct from
+        // template_header_id/template_footer_id) with a non-empty Body field
+        // is a custom, per-row display layout — use it instead of the
+        // standard table/grouped/kpi auto-renderer when present.
+        $bodyTemplate = $report->templates()->whereNotNull('body')->where('body', '!=', '')->first();
+        $body = $bodyTemplate
+            ? $this->renderWithBodyTemplate($bodyTemplate, $columns, $rows, $report)
+            : match ($type) {
+                'grouped' => $this->grouped($def, $columns, $rows),
+                'kpi'     => $this->kpi($def, $rows),
+                default   => $this->table($columns, $rows, $def),
+            };
 
         return $this->frame($report, $body);
+    }
+
+    // Renders one HTML block per row from the attached Template's Body field,
+    // substituting bare {{field_name}} tokens (dataset column names, no
+    // SCOPE prefix — distinct from {{SYSTEM|KEY}}-style constants) with that
+    // row's formatted value, then resolving any constants in the result too.
+    private function renderWithBodyTemplate(Template $template, array $columns, array $rows, Report $report): string
+    {
+        $projectId = $report->project_id ?? null;
+        $user = Auth::user();
+        $columnsByField = collect($columns)->keyBy('field');
+
+        $out = '';
+        foreach ($rows as $row) {
+            $html = (string) $template->body;
+            $html = preg_replace_callback('/\{\{([A-Za-z0-9_]+)\}\}/', function ($m) use ($row, $columnsByField) {
+                $col = $columnsByField->get($m[1]);
+                if ($col) {
+                    return e($this->cellValue($col, $row));
+                }
+
+                return array_key_exists($m[1], $row) ? e((string) $row[$m[1]]) : $m[0];
+            }, $html);
+            $html = $this->constants->resolve($html, $projectId, $user, $row, null, $report->name);
+            $out .= '<div class="airr-body-row">' . $html . '</div>';
+        }
+
+        return $out ?: '<p class="text-slate-400">No data.</p>';
     }
 
     // Column resolution shared by render() (HTML) and tabularData() (CSV/Excel
@@ -435,9 +471,11 @@ class ReportRenderer
         $headerHtml = ($enabled['template_header'] ?? true) ? $this->templateSectionHtml($def['template_header_id'] ?? null, ['header', 'page_header'], $projectId, $user, $report->name) : '';
         $footerHtml = ($enabled['template_footer'] ?? true) ? $this->templateSectionHtml($def['template_footer_id'] ?? null, ['footer', 'page_footer'], $projectId, $user, $report->name) : '';
 
+        // No automatic report-name heading — the report's name is only shown
+        // where explicitly referenced, via the {{SYSTEM|REPORT_NAME}} variable
+        // (e.g. inside a template header), not injected unconditionally here.
         return '<div class="airr-report space-y-3">'
             . ($headerHtml !== '' ? '<div class="airr-report-header">' . $headerHtml . '</div>' : '')
-            . '<h1 class="text-lg font-bold text-slate-800">' . e($report->name) . '</h1>'
             . '<div>' . $body . '</div>'
             . ($footerHtml !== '' ? '<div class="airr-report-footer">' . $footerHtml . '</div>' : '')
             . '</div>';
