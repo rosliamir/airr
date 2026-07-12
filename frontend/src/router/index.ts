@@ -60,6 +60,7 @@ const router = createRouter({
     { path: '/forgot-password', name: 'forgot-password', component: ForgotPasswordView, meta: { guestOnly: true, title: 'Forgot password' } },
     { path: '/reset-password', name: 'reset-password', component: ResetPasswordView, meta: { guestOnly: true, title: 'Reset password' } },
     { path: '/reports/:id/view', name: 'report-view', component: ReportViewerView, meta: { requiresAuth: true, title: 'Report', permission: 'reports.run' } },
+    { path: '/views/:savedViewId', name: 'saved-view', component: ReportViewerView, meta: { requiresAuth: true, title: 'Report', permission: 'reports.run' } },
     ...menuRoutes,
   ],
 })

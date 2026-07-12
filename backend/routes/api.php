@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\MenuController;
 use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RoleController;
+use App\Http\Controllers\Api\SavedViewController;
 use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\SystemController;
 use App\Http\Controllers\Api\UserController;
@@ -158,6 +159,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('reports/{report}/parameter-screen', [ReportController::class, 'parameterScreen'])->middleware('permission:reports.run');
     Route::post('reports/{report}/preview', [ReportController::class, 'preview'])->middleware('permission:reports.run');
     Route::post('reports/{report}/export-file', [ReportController::class, 'exportFile'])->middleware('permission:reports.run');
+    Route::middleware('permission:reports.run')->group(function () {
+        Route::post('reports/{report}/saved-views', [SavedViewController::class, 'store']);
+        Route::get('reports/{report}/saved-views', [SavedViewController::class, 'index']);
+    });
+    Route::get('saved-views/{savedView}', [SavedViewController::class, 'show'])->middleware('permission:reports.run');
+    Route::put('saved-views/{savedView}', [SavedViewController::class, 'update'])->middleware('permission:reports.run');
+    Route::delete('saved-views/{savedView}', [SavedViewController::class, 'destroy'])->middleware('permission:reports.run');
+    Route::post('saved-views/{savedView}/run', [SavedViewController::class, 'run'])->middleware('permission:reports.run');
+    Route::post('saved-views/{savedView}/generate-from-prompt', [SavedViewController::class, 'generateFromPrompt'])->middleware('permission:reports.run');
     Route::middleware('permission:reports.create')->group(function () {
         Route::post('reports', [ReportController::class, 'store']);
         Route::post('reports/import', [ReportController::class, 'import']);
