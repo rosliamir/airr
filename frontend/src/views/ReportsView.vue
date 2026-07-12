@@ -448,7 +448,7 @@ const boundDataSource = computed<DataSourceOpt | null>(() =>
 )
 const templatesAvailableToAdd = computed(() => allTemplates.value.filter(t => !editTemplateIds.value.includes(t.id)))
 const shareLink = computed(() =>
-  selected.value ? `${window.location.origin}/reports/${selected.value.id}` : ''
+  selected.value ? `${window.location.origin}/reports/${selected.value.id}/view` : ''
 )
 const apiEndpoint = computed(() =>
   selected.value ? `/api/reports/${selected.value.id}/run` : ''
@@ -790,6 +790,8 @@ async function publishReport() {
     selected.value = r.data
     editStatus.value = r.data.status
     await load()
+    // Publish gives you a single link you can open directly — jump straight to it.
+    window.open(`${window.location.origin}/reports/${r.data.id}/view`, '_blank')
   } catch (e) {
     runError.value = e instanceof ApiException ? e.error.message : 'Publish failed'
   } finally {

@@ -16,6 +16,7 @@ import ReportsView from '../views/ReportsView.vue'
 import MenusView from '../views/MenusView.vue'
 import AiOrchestrationView from '../views/AiOrchestrationView.vue'
 import TemplatesView from '../views/TemplatesView.vue'
+import ReportViewerView from '../views/ReportViewerView.vue'
 import ComingSoonView from '../views/ComingSoonView.vue'
 
 // Real views for the modules that are already built.
@@ -58,6 +59,7 @@ const router = createRouter({
     { path: '/register', name: 'register', component: RegisterView, meta: { guestOnly: true, title: 'Register' } },
     { path: '/forgot-password', name: 'forgot-password', component: ForgotPasswordView, meta: { guestOnly: true, title: 'Forgot password' } },
     { path: '/reset-password', name: 'reset-password', component: ResetPasswordView, meta: { guestOnly: true, title: 'Reset password' } },
+    { path: '/reports/:id/view', name: 'report-view', component: ReportViewerView, meta: { requiresAuth: true, title: 'Report', permission: 'reports.run' } },
     ...menuRoutes,
   ],
 })
