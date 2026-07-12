@@ -5,6 +5,12 @@ import AdminLayout from '../layouts/AdminLayout.vue'
 import { apiRequest, uploadFile, ApiException } from '../api/client'
 
 type DatasetParam = { name: string; label?: string; type?: string; default?: string }
+type CustomParam = {
+  id: string; title: string; name: string
+  type: 'text' | 'dropdown' | 'checkbox' | 'radio' | 'date' | 'datetime' | 'time' | 'amount'
+  default_value?: string | boolean | null; options?: string[]
+  enabled: boolean
+}
 type Report = {
   id: number; name: string; description?: string | null
   dataset?: { id: number; name: string; parameters?: DatasetParam[] } | null
@@ -30,11 +36,24 @@ const savedView = ref<SavedView | null>(null)
 const definition = ref<Record<string, unknown>>({})
 const html = ref('')
 const rowCount = ref<number | null>(null)
-const busy = ref(true)
+const busy = ref(false)
+const pageLoading = ref(true)
 const error = ref('')
 
 const runParams = ref<Record<string, string>>({})
 const boundDatasetParams = computed(() => report.value?.dataset?.parameters ?? [])
+// Same gating as the editor's Preview modal: only params whose Fixed toggle
+// is checked (fixed_parameters_enabled) actually appear/get sent, and the
+// screen only shows before running if requireParameterScreen (default on)
+// AND there's actually something to configure.
+const fixedParamsEnabled = computed(() => (definition.value.fixed_parameters_enabled as Record<string, boolean>) ?? {})
+const enabledDatasetParams = computed(() => boundDatasetParams.value.filter(p => fixedParamsEnabled.value[p.name] ?? true))
+const customParams = computed(() => (definition.value.custom_parameters as CustomParam[]) ?? [])
+const enabledCustomParams = computed(() => customParams.value.filter(p => p.enabled))
+const customParamValues = ref<Record<string, string | boolean>>({})
+const requireParameterScreen = computed(() => (definition.value.require_parameter_screen as boolean | undefined) ?? true)
+// false = show the parameter screen (Run button); true = show the result.
+const resultReady = ref(false)
 
 // ── Prompt panel — same idea as the report editor's: describe a change,
 // AI applies it. Here it always edits a personal SavedView, never the
@@ -62,19 +81,33 @@ async function loadReportMeta(id: number) {
   report.value = (await apiRequest<{ data: Report }>(`/reports/${id}`)).data
 }
 
+// Only enabled dataset params are actually sent — same rule as the editor's
+// Preview modal (a Fixed toggle that's unchecked means "ignore this param").
+const activeRunParams = computed(() => {
+  const out: Record<string, string> = {}
+  for (const p of enabledDatasetParams.value) out[p.name] = runParams.value[p.name] ?? ''
+  return out
+})
+const activeCustomParamValues = computed(() => {
+  const out: Record<string, string | boolean> = {}
+  for (const p of enabledCustomParams.value) out[p.name] = customParamValues.value[p.id] ?? ''
+  return out
+})
+
 async function runReport() {
+  resultReady.value = true
   busy.value = true
   error.value = ''
   try {
     if (savedView.value) {
       const res = await apiRequest<{ data: { html: string; row_count: number } }>(`/saved-views/${savedView.value.id}/run`, {
-        method: 'POST', body: JSON.stringify({ params: runParams.value }),
+        method: 'POST', body: JSON.stringify({ params: activeRunParams.value }),
       })
       html.value = res.data.html
       rowCount.value = res.data.row_count
     } else if (report.value) {
       const res = await apiRequest<{ data: { html: string; row_count: number } }>(`/reports/${report.value.id}/run`, {
-        method: 'POST', body: JSON.stringify({ params: runParams.value, definition: definition.value }),
+        method: 'POST', body: JSON.stringify({ params: activeRunParams.value, custom_params: activeCustomParamValues.value, definition: definition.value }),
       })
       html.value = res.data.html
       rowCount.value = res.data.row_count
@@ -100,10 +133,16 @@ onMounted(async () => {
       saveName.value = `${report.value?.name ?? 'Report'} — my view`
     }
     for (const p of boundDatasetParams.value) runParams.value[p.name] = p.default ?? ''
-    await runReport()
+    for (const p of customParams.value) customParamValues.value[p.id] = p.default_value ?? (p.type === 'checkbox' ? false : '')
+    pageLoading.value = false
+    // Same rule as the editor's Preview modal: show the parameter screen
+    // first unless the toggle is off, or there's simply nothing to
+    // configure (no enabled dataset/custom params) — then just run.
+    const hasParams = enabledDatasetParams.value.length > 0 || enabledCustomParams.value.length > 0
+    if (!requireParameterScreen.value || !hasParams) await runReport()
   } catch (e) {
     error.value = e instanceof ApiException ? e.error.message : 'Failed to load'
-    busy.value = false
+    pageLoading.value = false
   }
 })
 
@@ -274,20 +313,57 @@ async function exportReport(format: 'csv' | 'excel') {
           <button @click="copyShareUrl" class="text-airr-600 hover:underline shrink-0">Copy</button>
         </div>
 
-        <div v-if="boundDatasetParams.length" class="flex flex-wrap items-end gap-3 bg-slate-50 rounded-lg px-3 py-2">
-          <div v-for="p in boundDatasetParams" :key="p.name">
-            <label class="block text-[10px] text-slate-500 mb-0.5">{{ p.label || p.name }}</label>
-            <input v-model="runParams[p.name]" :type="p.type === 'date' ? 'date' : 'text'"
-              class="text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300" />
+        <p v-if="error" class="text-sm text-airr-700 bg-airr-50 rounded-lg px-3 py-2">{{ error }}</p>
+        <div v-if="pageLoading" class="text-slate-400 text-sm">Loading…</div>
+
+        <!-- Parameter screen — shown before running, same rule as the editor's
+             Preview modal: only when requireParameterScreen is on AND there's
+             something to configure (enabled dataset/custom params). -->
+        <div v-else-if="!resultReady" class="bg-white shadow-sm rounded-xl p-6 flex items-start justify-center">
+          <div class="w-full max-w-md space-y-3">
+            <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Parameters</p>
+            <div v-for="p in enabledDatasetParams" :key="p.name">
+              <label class="block text-[10px] text-slate-500 mb-0.5">{{ p.label || p.name }}</label>
+              <input v-model="runParams[p.name]" :type="p.type === 'number' ? 'number' : p.type === 'date' ? 'date' : 'text'"
+                class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300" />
+            </div>
+            <div v-for="p in enabledCustomParams" :key="p.id">
+              <label class="block text-[10px] text-slate-500 mb-0.5">{{ p.title }}</label>
+              <select v-if="p.type === 'dropdown'" v-model="customParamValues[p.id]"
+                class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300">
+                <option v-for="o in (p.options ?? [])" :key="o" :value="o">{{ o }}</option>
+              </select>
+              <div v-else-if="p.type === 'radio'" class="flex flex-wrap gap-3 pt-0.5">
+                <label v-for="o in (p.options ?? [])" :key="o" class="flex items-center gap-1 text-xs text-slate-600">
+                  <input type="radio" :name="`cp_${p.id}`" :value="o" v-model="customParamValues[p.id]" /> {{ o }}
+                </label>
+              </div>
+              <label v-else-if="p.type === 'checkbox'" class="flex items-center gap-1.5 text-xs text-slate-600 pt-0.5">
+                <input type="checkbox" v-model="customParamValues[p.id]" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" /> Yes
+              </label>
+              <input v-else v-model="customParamValues[p.id]"
+                :type="p.type === 'date' ? 'date' : p.type === 'datetime' ? 'datetime-local' : p.type === 'time' ? 'time' : p.type === 'amount' ? 'number' : 'text'"
+                class="w-full text-xs rounded border border-slate-200 px-2 py-1 outline-none focus:ring-2 focus:ring-airr-300" />
+            </div>
+            <div class="flex justify-end pt-2">
+              <button @click="runReport" :disabled="busy"
+                class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-4 py-2 disabled:opacity-50">
+                {{ busy ? 'Running…' : 'Run' }}
+              </button>
+            </div>
           </div>
-          <button @click="runReport" class="text-xs font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5">Run</button>
         </div>
 
-        <p v-if="error" class="text-sm text-airr-700 bg-airr-50 rounded-lg px-3 py-2">{{ error }}</p>
-        <div v-if="busy" class="text-slate-400 text-sm">Loading…</div>
-        <div v-else-if="html" class="bg-white shadow-sm rounded-xl p-5 overflow-x-auto">
-          <div v-html="html"></div>
-        </div>
+        <template v-else>
+          <div v-if="enabledDatasetParams.length || enabledCustomParams.length" class="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+            <button @click="resultReady = false" class="text-xs font-medium text-slate-500 hover:text-slate-700">← Back to parameters</button>
+            <button @click="runReport" :disabled="busy" class="text-xs font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5 disabled:opacity-50">{{ busy ? 'Running…' : 'Re-run' }}</button>
+          </div>
+          <div v-if="busy" class="text-slate-400 text-sm">Loading…</div>
+          <div v-else-if="html" class="bg-white shadow-sm rounded-xl p-5 overflow-x-auto">
+            <div v-html="html"></div>
+          </div>
+        </template>
       </div>
 
       <!-- Prompt panel docked right/bottom comes after the main content -->
