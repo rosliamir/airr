@@ -177,7 +177,13 @@ class SavedViewController extends Controller
     {
         return [
             'id' => $v->id, 'report_id' => $v->report_id, 'name' => $v->name,
-            'definition' => $v->definition, 'prompt' => $v->prompt, 'prompt_history' => $v->prompt_history ?? [],
+            'definition' => $v->definition, 'prompt' => $v->prompt,
+            // The real, authoritative history lives inside definition.prompt_history —
+            // DefinitionPromptEditor::apply() already appends to it on every prompt, the
+            // same way the report editor's own prompt history works. The separate
+            // saved_views.prompt_history DB column is unused; reading it here (as this
+            // used to) meant history always came back empty on reload.
+            'prompt_history' => ($v->definition['prompt_history'] ?? []),
             'report' => $v->relationLoaded('report') && $v->report ? ['id' => $v->report->id, 'name' => $v->report->name] : null,
             'created_at' => $v->created_at, 'updated_at' => $v->updated_at,
         ];

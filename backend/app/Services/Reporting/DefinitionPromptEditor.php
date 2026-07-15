@@ -48,6 +48,14 @@ class DefinitionPromptEditor
     private function systemPrompt(): string
     {
         return <<<'SYSTEM'
+Follow the user's instruction completely and precisely — this is the most important rule. If the
+instruction has multiple parts (joined by "and", "dan", commas, multiple sentences, or a numbered/
+bulleted list), apply EVERY part; never silently skip, partially apply, or only address the first part
+of a multi-part instruction. If part of the instruction is ambiguous, make the most reasonable
+interpretation and still apply it — do not drop it just because it's unclear. If the instruction asks
+for something this schema has no direct key for, map it to the closest supported feature rather than
+ignoring it outright.
+
 You edit a report definition JSON for a reporting tool. The renderer ONLY understands these keys — do
 not invent other keys, they will be silently ignored:
 
