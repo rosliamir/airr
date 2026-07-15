@@ -135,6 +135,16 @@ class SavedViewController extends Controller
             'file'   => 'nullable|file|max:10240|mimes:jpg,jpeg,png,webp,pdf,txt,md,csv',
         ]);
 
+        $sampleRows = null;
+        $report = $savedView->report;
+        if ($report && $report->dataset) {
+            try {
+                $sampleRows = $this->connector->run($report->dataset, [], 1, 30)['rows'] ?? null;
+            } catch (\Throwable) {
+                $sampleRows = null;
+            }
+        }
+
         try {
             $decoded = $editor->apply(
                 (array) ($savedView->definition ?? []),
@@ -142,6 +152,7 @@ class SavedViewController extends Controller
                 $request->file('file'),
                 $resolver->model('generation'),
                 $ai,
+                $sampleRows,
             );
         } catch (\RuntimeException) {
             return $this->sendError(422, 'AI_RESPONSE_INVALID', 'The AI did not return valid JSON. Try rephrasing the instruction.');

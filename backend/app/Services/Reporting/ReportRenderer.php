@@ -35,8 +35,15 @@ class ReportRenderer
             : match ($type) {
                 'grouped' => $this->grouped($def, $columns, $rows),
                 'kpi'     => $this->kpi($def, $rows),
+                'chart'   => $this->chart($def, $rows),
                 default   => $this->table($columns, $rows, $def),
             };
+        // An AI-written narrative (grounded in the actual fetched rows —
+        // see DefinitionPromptEditor/ReportController) sits above the body.
+        if (! empty($def['narrative'])) {
+            $body = '<div class="text-sm text-slate-700 bg-slate-50 rounded-lg px-4 py-3 mb-3">'
+                . nl2br(e((string) $def['narrative'])) . '</div>' . $body;
+        }
 
         return $this->frame($report, $body);
     }
@@ -115,17 +122,23 @@ class ReportRenderer
     private function columns(array $def, array $datasetColumns): array
     {
         if (! empty($def['columns'])) {
-            return array_map(fn ($c) => [
+            // "hidden" columns are kept in the definition (so a later prompt like
+            // "show negara again" can flip them back on) but filtered out of what
+            // actually renders — distinct from removing a column outright.
+            $cols = array_map(fn ($c) => [
                 'field'     => $c['field'],
                 'label'     => $c['label'] ?? $this->humanize($c['field']),
                 'format'    => $c['format'] ?? 'text',
                 'value_map' => $c['value_map'] ?? null,
                 'calc'      => $c['calc'] ?? null,
                 'align'     => $c['align'] ?? null,
+                'hidden'    => $c['hidden'] ?? false,
             ], $def['columns']);
+
+            return array_values(array_filter($cols, fn ($c) => ! $c['hidden']));
         }
 
-        return array_map(fn ($f) => ['field' => $f, 'label' => $this->humanize($f), 'format' => 'text', 'value_map' => null, 'calc' => null, 'align' => null], $datasetColumns);
+        return array_map(fn ($f) => ['field' => $f, 'label' => $this->humanize($f), 'format' => 'text', 'value_map' => null, 'calc' => null, 'align' => null, 'hidden' => false], $datasetColumns);
     }
 
     private function alignClass(array $c): string
@@ -286,6 +299,115 @@ class ReportRenderer
         }
 
         return $out;
+    }
+
+    // type=chart — a simple bar/line/pie chart, one point per distinct value
+    // of groups[0].field, plotted against aggregates[0] (fn/field). Pure
+    // inline SVG (no JS/canvas) so it stays print-stable and reproducible,
+    // same as the rest of the renderer.
+    private function chart(array $def, array $rows): string
+    {
+        $groupField = $def['groups'][0]['field'] ?? null;
+        if (! $groupField) {
+            return '<p class="text-slate-400">A chart needs a "groups" field to plot categories by.</p>';
+        }
+        $agg = $def['aggregates'][0] ?? ['field' => '*', 'fn' => 'count', 'label' => 'Count'];
+
+        $buckets = [];
+        foreach ($rows as $row) {
+            $buckets[(string) ($row[$groupField] ?? '—')][] = $row;
+        }
+        $points = [];
+        foreach ($buckets as $label => $groupRows) {
+            $points[] = ['label' => $label, 'value' => $this->aggregate($agg['fn'] ?? 'count', $agg['field'] ?? '*', $groupRows)];
+        }
+        if (! $points) {
+            return '<p class="text-slate-400">No data.</p>';
+        }
+
+        $chartType = $def['chart_type'] ?? 'bar';
+
+        return match ($chartType) {
+            'pie'  => $this->pieChartSvg($points),
+            'line' => $this->xyChartSvg($points, true),
+            default => $this->xyChartSvg($points, false),
+        };
+    }
+
+    private const CHART_W = 640;
+    private const CHART_H = 320;
+    private const CHART_PAD = 40;
+
+    // Shared bar/line renderer — same coordinate system for both, only the
+    // mark (rect vs connected polyline + dots) differs.
+    private function xyChartSvg(array $points, bool $line): string
+    {
+        $w = self::CHART_W;
+        $h = self::CHART_H;
+        $pad = self::CHART_PAD;
+        $max = max(array_column($points, 'value')) ?: 1;
+        $n = count($points);
+        $slot = ($w - 2 * $pad) / max(1, $n);
+
+        $marks = '';
+        $labels = '';
+        $coords = [];
+        foreach ($points as $i => $p) {
+            $barH = ($p['value'] / $max) * ($h - 2 * $pad);
+            $x = $pad + $i * $slot;
+            $cx = $x + $slot / 2;
+            $cy = $h - $pad - $barH;
+            $coords[] = [$cx, $cy];
+            if (! $line) {
+                $barW = max(8, $slot * 0.6);
+                $marks .= '<rect x="' . ($cx - $barW / 2) . '" y="' . $cy . '" width="' . $barW . '" height="' . $barH
+                    . '" rx="3" fill="#E11D48" />';
+            }
+            $labels .= '<text x="' . $cx . '" y="' . ($h - $pad + 16) . '" font-size="11" fill="#64748b" text-anchor="middle">'
+                . e(mb_strimwidth((string) $p['label'], 0, 12, '…')) . '</text>';
+            $marks .= '<text x="' . $cx . '" y="' . ($cy - 6) . '" font-size="10" fill="#334155" text-anchor="middle">' . e($this->fmt($p['value'], 'number')) . '</text>';
+        }
+        if ($line) {
+            $poly = implode(' ', array_map(fn ($c) => $c[0] . ',' . $c[1], $coords));
+            $marks .= '<polyline points="' . $poly . '" fill="none" stroke="#E11D48" stroke-width="2" />';
+            foreach ($coords as $c) {
+                $marks .= '<circle cx="' . $c[0] . '" cy="' . $c[1] . '" r="3.5" fill="#E11D48" />';
+            }
+        }
+
+        return '<svg viewBox="0 0 ' . $w . ' ' . $h . '" class="w-full max-w-2xl" style="max-height:360px">'
+            . '<line x1="' . $pad . '" y1="' . ($h - $pad) . '" x2="' . ($w - $pad / 2) . '" y2="' . ($h - $pad) . '" stroke="#e2e8f0" />'
+            . $marks . $labels . '</svg>';
+    }
+
+    private function pieChartSvg(array $points): string
+    {
+        $total = array_sum(array_column($points, 'value')) ?: 1;
+        $cx = 160;
+        $cy = 160;
+        $r = 140;
+        $colors = ['#E11D48', '#FB7185', '#9F1239', '#FDA4AF', '#881337', '#F43F5E', '#BE123C', '#FECDD3'];
+        $angle = -M_PI / 2;
+        $slices = '';
+        $legend = '';
+        foreach ($points as $i => $p) {
+            $frac = $p['value'] / $total;
+            $sweep = $frac * 2 * M_PI;
+            $x1 = $cx + $r * cos($angle);
+            $y1 = $cy + $r * sin($angle);
+            $angle += $sweep;
+            $x2 = $cx + $r * cos($angle);
+            $y2 = $cy + $r * sin($angle);
+            $large = $sweep > M_PI ? 1 : 0;
+            $color = $colors[$i % count($colors)];
+            $slices .= '<path d="M' . $cx . ',' . $cy . ' L' . $x1 . ',' . $y1 . ' A' . $r . ',' . $r . ' 0 ' . $large . ' 1 ' . $x2 . ',' . $y2 . ' Z" fill="' . $color . '" stroke="white" stroke-width="1" />';
+            $legend .= '<div class="flex items-center gap-1.5 text-xs"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:' . $color . '"></span>'
+                . e((string) $p['label']) . ' <span class="text-slate-400">(' . e($this->fmt($p['value'], 'number')) . ', ' . round($frac * 100, 1) . '%)</span></div>';
+        }
+
+        return '<div class="flex items-center gap-6 flex-wrap">'
+            . '<svg viewBox="0 0 320 320" class="shrink-0" style="width:280px;height:280px">' . $slices . '</svg>'
+            . '<div class="space-y-1">' . $legend . '</div></div>';
     }
 
     private function kpi(array $def, array $rows): string

@@ -14,7 +14,10 @@ class DefinitionPromptEditor
 {
     // Thrown when the AI call fails or its response can't be parsed as JSON —
     // callers catch this and turn it into their own HTTP error response.
-    public function apply(array $existingDefinition, string $prompt, ?UploadedFile $file, string $model, AiProvider $ai): array
+    // $sampleRows (a bounded sample of the dataset's actual rows, if the
+    // caller has them handy) lets the AI ground a requested "narrative"/
+    // analysis in real values instead of only reasoning about column names.
+    public function apply(array $existingDefinition, string $prompt, ?UploadedFile $file, string $model, AiProvider $ai, ?array $sampleRows = null): array
     {
         $genOptions = ['system' => $this->systemPrompt(), 'temperature' => 0.2];
         $attachmentNote = '';
@@ -22,8 +25,13 @@ class DefinitionPromptEditor
             [$genOptions, $attachmentNote] = $this->attachFileToPrompt($file, $genOptions);
         }
 
+        $sampleNote = $sampleRows
+            ? "\n\nSample of the actual data (first " . count($sampleRows) . " row(s) — use this if the instruction asks for an "
+                . "analysis/summary/insight; do not assume it's the complete dataset):\n" . json_encode($sampleRows, JSON_PARTIAL_OUTPUT_ON_ERROR)
+            : '';
+
         $userMessage = "Current definition:\n" . json_encode($existingDefinition, JSON_PRETTY_PRINT)
-            . "\n\nInstruction: {$prompt}" . $attachmentNote;
+            . "\n\nInstruction: {$prompt}" . $attachmentNote . $sampleNote;
 
         $raw = $ai->generate($model, $userMessage, $genOptions);
         $decoded = $this->extractJsonObject($raw);
@@ -38,6 +46,11 @@ class DefinitionPromptEditor
         $decoded['require_parameter_screen'] = $existingDefinition['require_parameter_screen'] ?? true;
         $decoded['filter_condition'] = $existingDefinition['filter_condition'] ?? '';
         $decoded['show_header_menu'] = $existingDefinition['show_header_menu'] ?? true;
+        // Safety net matching guardColumns' spirit: only overwrite an existing
+        // narrative if the AI actually wrote a new one this time.
+        if (empty($decoded['narrative']) && ! empty($existingDefinition['narrative'])) {
+            $decoded['narrative'] = $existingDefinition['narrative'];
+        }
         $promptHistory = (array) ($existingDefinition['prompt_history'] ?? []);
         $promptHistory[] = ['text' => $prompt, 'at' => now()->toIso8601String()];
         $decoded['prompt_history'] = $promptHistory;
@@ -59,11 +72,24 @@ ignoring it outright.
 You edit a report definition JSON for a reporting tool. The renderer ONLY understands these keys — do
 not invent other keys, they will be silently ignored:
 
-- type: one of table | grouped | kpi | matrix | chart | document
-- columns: array of {field, label, format, align, value_map, calc}.
+- type: one of table | grouped | kpi | chart. Use "chart" whenever the instruction asks to "generate a
+  graph/chart", "visualize", "plot", or similar — it needs a "groups" field (the category axis) and an
+  "aggregates" entry (what's measured per category); see chart_type below for bar/line/pie.
+- chart_type: one of bar | line | pie — only relevant when type=chart. Default is "bar" if omitted.
+  Use "pie" for "proportion/breakdown/share of total" asks, "line" for "trend over time", "bar" otherwise.
+- narrative: a short (2-5 sentence) plain-text written analysis/insight about the data — this is what
+  "analyze the data", "give me insights", "summarize the data", "produce an analysis" mean. Ground it in
+  the actual sample rows you're given (if any) — cite real numbers/trends from them, don't invent figures.
+  Only set/update this when the instruction actually asks for analysis; otherwise leave any existing
+  narrative untouched (copy it over as-is) rather than erasing it.
+- columns: array of {field, label, format, align, value_map, calc, hidden}.
     - field: the dataset column name this report column reads from (or, for a calculated column, a NEW
       unique name you invent — see "calc" below).
     - label: the column header text shown to the user.
+    - hidden: boolean, default false. "Hide column X" / "remove X from view" (as opposed to permanently
+      deleting it) means set hidden=true on that column — keep the column object itself in the array so
+      a later "show X again" can flip it back to false. Prefer this over actually removing the column
+      unless the instruction explicitly says to delete/remove it outright.
     - format: one of:
         text
         number       — trims trailing zeros, e.g. 40.80 -> "40.8", 420.00 -> "420"

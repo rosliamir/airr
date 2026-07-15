@@ -603,6 +603,19 @@ class ReportController extends Controller
             'file'   => 'nullable|file|max:10240|mimes:jpg,jpeg,png,webp,pdf,txt,md,csv',
         ]);
 
+        // A bounded sample of real rows lets the AI ground a requested
+        // narrative/analysis in actual values instead of guessing from column
+        // names alone. Best-effort — if the dataset can't be reached, the
+        // edit still proceeds without a sample.
+        $sampleRows = null;
+        if ($report->dataset) {
+            try {
+                $sampleRows = $this->connector->run($report->dataset, [], 1, 30)['rows'] ?? null;
+            } catch (\Throwable) {
+                $sampleRows = null;
+            }
+        }
+
         try {
             $decoded = $editor->apply(
                 (array) ($report->definition ?? []),
@@ -610,6 +623,7 @@ class ReportController extends Controller
                 $request->file('file'),
                 $resolver->model('generation'),
                 $ai,
+                $sampleRows,
             );
         } catch (\RuntimeException $e) {
             return $this->sendError(422, 'AI_RESPONSE_INVALID', 'The AI did not return valid JSON. Try rephrasing the instruction.');
@@ -828,6 +842,7 @@ class ReportController extends Controller
             'definition.columns.*.value_map' => 'nullable|array',
             'definition.columns.*.calc'  => 'nullable|string|max:500',
             'definition.columns.*.align' => ['nullable', Rule::in(['left', 'right', 'center'])],
+            'definition.columns.*.hidden' => 'nullable|boolean',
             'definition.groups'      => 'nullable|array',
             'definition.aggregates'  => 'nullable|array',
             'definition.filters'     => 'nullable|array',
@@ -836,6 +851,8 @@ class ReportController extends Controller
             'definition.conditional' => 'nullable|array',
             'definition.striped'     => 'nullable|boolean',
             'definition.show_row_number' => 'nullable|boolean',
+            'definition.chart_type'  => ['nullable', Rule::in(['bar', 'line', 'pie'])],
+            'definition.narrative'   => 'nullable|string|max:2000',
             'definition.prompt'      => 'nullable|string|max:2000',
             'definition.prompt_history'       => 'nullable|array',
             'definition.prompt_history.*.text' => 'nullable|string|max:2000',
