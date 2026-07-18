@@ -53,7 +53,14 @@ class DefinitionPromptEditor
         $decoded['fixed_parameters_enabled'] = $existingDefinition['fixed_parameters_enabled'] ?? [];
         $decoded['custom_parameters'] = $existingDefinition['custom_parameters'] ?? [];
         $decoded['require_parameter_screen'] = $existingDefinition['require_parameter_screen'] ?? true;
-        $decoded['filter_condition'] = $existingDefinition['filter_condition'] ?? '';
+        // Same guard as narrative below: only fall back to the existing
+        // filter_condition if the AI's response didn't set one at all —
+        // previously this unconditionally reset it to the old value even
+        // when the AI correctly wrote a new one, so a prompt asking to
+        // change/add a filter could never actually take effect.
+        if (! array_key_exists('filter_condition', $decoded)) {
+            $decoded['filter_condition'] = $existingDefinition['filter_condition'] ?? '';
+        }
         $decoded['show_header_menu'] = $existingDefinition['show_header_menu'] ?? true;
         // Safety net matching guardColumns' spirit: only overwrite an existing
         // narrative if the AI actually wrote a new one this time.
@@ -91,6 +98,17 @@ not invent other keys, they will be silently ignored:
   the actual sample rows you're given (if any) — cite real numbers/trends from them, don't invent figures.
   Only set/update this when the instruction actually asks for analysis; otherwise leave any existing
   narrative untouched (copy it over as-is) rather than erasing it.
+- filter_condition: a single plain-language sentence describing which ROWS to keep — not a formatting
+  rule, an actual row filter (e.g. "only show rows where jumlah bayaran is above 100", "exclude records
+  below 50", "hanya papar rekod tahun 2024"). This is what "exclude/remove/hide records where...",
+  "keluarkan rekod...", "only show...", "filter to..." mean when the instruction is about which ROWS
+  appear, as opposed to how a column looks (that's "conditional" below, or "hidden" for whole columns).
+  It's resolved and evaluated against the real fetched rows at run time, separately from this JSON edit —
+  you never see actual row data here, so don't try to compute the filter yourself; just write/update the
+  one-sentence description of it. If the instruction changes or adds to an existing filter_condition,
+  rewrite the whole sentence to reflect the combined intent (e.g. append "and also exclude..."); if it's
+  unrelated to filtering, copy the existing filter_condition over unchanged (or omit the key entirely to
+  leave it as-is) rather than erasing it.
 - columns: array of {field, label, format, align, value_map, calc, hidden}.
     - field: the dataset column name this report column reads from (or, for a calculated column, a NEW
       unique name you invent — see "calc" below).
