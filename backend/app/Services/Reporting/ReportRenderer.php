@@ -157,6 +157,14 @@ class ReportRenderer
     private function cellValue(array $c, array $row): string
     {
         $raw = $c['calc'] ? $this->evalExpr((string) $c['calc'], $row) : ($row[$c['field']] ?? null);
+        // Fixed-width DB columns (Oracle CHAR, etc.) commonly return
+        // trailing-space-padded strings ("K         ") — trim before display
+        // and before any value_map lookup, or an exact match like "K" would
+        // never hit and every row would silently fall through to the "*"
+        // fallback regardless of its actual value.
+        if (is_string($raw)) {
+            $raw = trim($raw);
+        }
 
         if (is_array($c['value_map'] ?? null)) {
             $key = (string) $raw;
