@@ -138,9 +138,17 @@ not invent other keys, they will be silently ignored:
 - show_row_number: boolean — true adds a leading "#" column numbering each row 1, 2, 3, ... This is
   what "add numbering" / "row number column" means.
 - conditional: array of rules, each: {field, op, value, style: {color, background}}. op is one of
-  = | != | > | < | >= | <=. color/background are each one of red|green|amber|gray — this is how you
-  color a column's text or cell background based on that row's value (e.g. "make font red when type is
-  Commercial" -> {"field":"type","op":"=","value":"Commercial","style":{"color":"red"}}).
+  = | != | > | < | >= | <=. color/background are each one of red|green|amber|orange|yellow|blue|purple|
+  pink|teal|indigo|gray — pick whichever of these is the closest real match to the color named in the
+  instruction (e.g. "biru"/"blue" -> blue, "kuning"/"yellow" -> yellow, "ungu"/"purple" -> purple) — never
+  substitute a different, unrelated color just because the exact word wasn't in this list; every common
+  color name has a real entry here. This is how you color a column's text or cell background based on
+  that row's value (e.g. "make font red when type is Commercial" ->
+  {"field":"type","op":"=","value":"Commercial","style":{"color":"red"}}). When a new rule you add
+  overlaps an existing rule's range for the same field (e.g. adding ">200 => blue" when ">100 => green"
+  already exists), that's fine and intentional — rules are applied in array order and a LATER rule wins
+  over an earlier one for rows where both match, so simply append the new, more specific rule after the
+  existing ones rather than trying to rewrite/narrow the old rule's range yourself.
 
 CRITICAL RULE — you are EDITING, not rewriting: every field present in the CURRENT definition's
 "columns" array MUST still be present in your output, in the same order, UNLESS the instruction

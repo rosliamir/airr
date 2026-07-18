@@ -471,6 +471,11 @@ class ReportRenderer
     // field.
     private function condClass(array $def, string $field, array $row): string
     {
+        // Last matching rule wins (not first) — a newly added rule that
+        // further refines an existing one (e.g. an earlier ">100 => green"
+        // plus a later ">200 => blue") is meant to take precedence for the
+        // overlap, the same mental model as "add this on top of the rest."
+        $class = '';
         foreach ($def['conditional'] ?? [] as $rule) {
             if (($rule['field'] ?? null) !== $field) {
                 continue;
@@ -479,19 +484,19 @@ class ReportRenderer
                 continue;
             }
             if ($color = $rule['style']['color'] ?? null) {
-                return ' ' . $this->colorClass($color);
+                $class = ' ' . $this->colorClass($color);
             }
         }
 
-        return '';
+        return $class;
     }
 
-    // Row-level: the first matching rule (across all fields, in definition
-    // order) that specifies a background wins, so the whole <tr> is
-    // highlighted rather than just the single column the rule's condition
-    // references.
+    // Row-level: same "last match wins" rule as condClass() above — a later,
+    // more specific rule (e.g. an added ">200 => blue" after an existing
+    // ">100 => green") takes precedence over an earlier, broader one.
     private function rowConditionalBg(array $def, array $row): string
     {
+        $bgClass = '';
         foreach ($def['conditional'] ?? [] as $rule) {
             $field = $rule['field'] ?? null;
             if (! $field || ! array_key_exists($field, $row)) {
@@ -501,11 +506,11 @@ class ReportRenderer
                 continue;
             }
             if ($bg = $rule['style']['background'] ?? null) {
-                return $this->bgClass($bg);
+                $bgClass = $this->bgClass($bg);
             }
         }
 
-        return '';
+        return $bgClass;
     }
 
     private function matches($actual, string $op, $expected): bool
@@ -526,7 +531,13 @@ class ReportRenderer
         return match ($color) {
             'red'    => 'text-rose-600 font-medium',
             'green'  => 'text-emerald-600 font-medium',
-            'amber'  => 'text-amber-600 font-medium',
+            'amber', 'orange', 'yellow' => 'text-amber-600 font-medium',
+            'blue'   => 'text-blue-600 font-medium',
+            'purple' => 'text-purple-600 font-medium',
+            'pink'   => 'text-pink-600 font-medium',
+            'teal'   => 'text-teal-600 font-medium',
+            'indigo' => 'text-indigo-600 font-medium',
+            'gray', 'grey' => 'text-slate-500 font-medium',
             default  => 'text-slate-700',
         };
     }
@@ -536,7 +547,12 @@ class ReportRenderer
         return match ($color) {
             'red'    => 'bg-rose-50',
             'green'  => 'bg-emerald-50',
-            'amber'  => 'bg-amber-50',
+            'amber', 'orange', 'yellow' => 'bg-amber-50',
+            'blue'   => 'bg-blue-50',
+            'purple' => 'bg-purple-50',
+            'pink'   => 'bg-pink-50',
+            'teal'   => 'bg-teal-50',
+            'indigo' => 'bg-indigo-50',
             'gray', 'grey' => 'bg-slate-100',
             default  => '',
         };
