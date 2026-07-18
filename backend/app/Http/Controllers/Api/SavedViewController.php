@@ -11,6 +11,7 @@ use App\Services\Ai\ModelResolver;
 use App\Services\AuditService;
 use App\Services\ConnectorService;
 use App\Services\ConstantResolver;
+use App\Services\Reporting\ConditionFilterApplier;
 use App\Services\Reporting\DefinitionPromptEditor;
 use App\Services\Reporting\ReportRenderer;
 use Illuminate\Http\JsonResponse;
@@ -98,10 +99,11 @@ class SavedViewController extends Controller
     // Runs the saved view's own definition against the SOURCE report's
     // dataset — same rendering pipeline as ReportController::run(), just
     // fed the saved view's definition instead of the report's persisted one.
-    public function run(Request $request, SavedView $savedView): JsonResponse
+    public function run(Request $request, SavedView $savedView, ModelResolver $resolver, AiProvider $ai, ConditionFilterApplier $conditionFilter): JsonResponse
     {
         $this->authorizeOwner($request, $savedView);
         $params = (array) $request->input('params', []);
+        $customParams = (array) $request->input('custom_params', []);
         $report = $savedView->report;
         $report->definition = $savedView->definition; // in-memory only, never saved back to the report
 
@@ -120,6 +122,11 @@ class SavedViewController extends Controller
                 return $this->sendError(503, 'DATASOURCE_UNAVAILABLE', 'Could not reach the data source: ' . $e->getMessage());
             }
             $data = ['columns' => $result['columns'] ?? [], 'rows' => $result['rows'] ?? []];
+            // A saved view's own Filter/condition applies just like it would
+            // running the source report directly — previously this was
+            // silently skipped for saved views, the one place a viewer
+            // actually interacts with it day to day.
+            $data['rows'] = $conditionFilter->apply($report, $data['rows'], $resolver, $ai, $customParams);
         }
 
         $html = $this->renderer->render($report, $data);

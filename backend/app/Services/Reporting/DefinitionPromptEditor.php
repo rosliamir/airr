@@ -33,8 +33,17 @@ class DefinitionPromptEditor
         $userMessage = "Current definition:\n" . json_encode($existingDefinition, JSON_PRETTY_PRINT)
             . "\n\nInstruction: {$prompt}" . $attachmentNote . $sampleNote;
 
-        $raw = $ai->generate($model, $userMessage, $genOptions);
-        $decoded = $this->extractJsonObject($raw);
+        // Models occasionally wrap the JSON in stray prose or truncate it —
+        // this is transient, not a real failure of the instruction, so retry
+        // once with a firmer reminder before giving up and surfacing an error.
+        $decoded = null;
+        for ($attempt = 0; $attempt < 2 && $decoded === null; $attempt++) {
+            $message = $attempt === 0
+                ? $userMessage
+                : $userMessage . "\n\n(Your previous reply wasn't valid JSON — respond with ONLY the JSON object this time, nothing else.)";
+            $raw = $ai->generate($model, $message, $genOptions);
+            $decoded = $this->extractJsonObject($raw);
+        }
         if ($decoded === null) {
             throw new \RuntimeException('AI_RESPONSE_INVALID');
         }

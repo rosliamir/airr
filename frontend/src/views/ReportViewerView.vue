@@ -101,13 +101,13 @@ async function runReport() {
   try {
     if (savedView.value) {
       const res = await apiRequest<{ data: { html: string; row_count: number } }>(`/saved-views/${savedView.value.id}/run`, {
-        method: 'POST', body: JSON.stringify({ params: activeRunParams.value }),
+        method: 'POST', body: JSON.stringify({ params: activeRunParams.value, custom_params: activeCustomParamValues.value }),
       })
       html.value = res.data.html
       rowCount.value = res.data.row_count
     } else if (report.value) {
       const res = await apiRequest<{ data: { html: string; row_count: number } }>(`/reports/${report.value.id}/run`, {
-        method: 'POST', body: JSON.stringify({ params: activeRunParams.value, custom_params: activeCustomParamValues.value, definition: definition.value }),
+        method: 'POST', body: JSON.stringify({ params: activeRunParams.value, custom_params: activeCustomParamValues.value, apply_filter: true, definition: definition.value }),
       })
       html.value = res.data.html
       rowCount.value = res.data.row_count
