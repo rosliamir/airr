@@ -44,7 +44,12 @@ class ConditionFilterApplier
                     . 'formats (dd/mm/yyyy, mm/dd/yyyy, yyyy-mm-dd, with or without time) — always compare them '
                     . 'by their actual calendar date/time meaning, never by exact string equality. The same '
                     . 'applies to numbers with different formatting (thousands separators, trailing zeros, '
-                    . 'currency symbols) — compare by numeric value. Respond with only a JSON array of integer indices.',
+                    . 'currency symbols) — compare by numeric value. The condition may itself describe a '
+                    . 'fallback for when a referenced value is blank/empty/missing (e.g. "field is X, if blank '
+                    . 'just show N records") — if the value it names IS blank/empty in the condition text you '
+                    . 'were given, follow that fallback instruction literally (e.g. return the first N row '
+                    . 'indices) instead of trying to match rows against an empty value. Respond with only a '
+                    . 'JSON array of integer indices.',
                 'temperature' => 0,
             ]);
             $indices = $this->extractJsonArrayOfInts($raw);
