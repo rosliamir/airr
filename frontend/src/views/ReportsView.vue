@@ -3,6 +3,8 @@ import { onMounted, onUnmounted, ref, computed, watch, inject } from 'vue'
 import AdminLayout from '../layouts/AdminLayout.vue'
 import { apiRequest, uploadFile, downloadFile, ApiException } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useListViewMode } from '../composables/useListViewMode'
+import ViewModeToggle from '../components/ViewModeToggle.vue'
 
 type Ref2 = { id: number; name: string; code?: string }
 type Grant = { role_id: number; name?: string; view: boolean; edit: boolean; run: boolean }
@@ -276,6 +278,7 @@ const STATUS_ACCENT: Record<string, string> = {
 }
 
 // ── Card grid: selection, sort, per-card menu, debug mode ────────────────────
+const { viewMode } = useListViewMode('reports')
 const selectedIds = ref<Set<number>>(new Set())
 const sortBy = ref<'-updated_at' | 'updated_at' | 'name' | '-name' | 'status'>('-updated_at')
 const reportSearchText = ref('')
@@ -1233,19 +1236,22 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
             </select>
             <input v-model="reportSearchText" placeholder="Search reports…" class="text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-airr-300 w-40" />
           </div>
-          <div v-if="selectedIds.size" class="flex items-center gap-2">
-            <span class="text-xs text-slate-400">{{ selectedIds.size }} selected</span>
-            <button @click="bulkDuplicate" :disabled="busy" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Duplicate</button>
-            <button @click="bulkExport" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Export</button>
-            <button @click="bulkArchive" :disabled="busy" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Archive</button>
-            <button @click="bulkDelete" :disabled="busy" class="text-xs font-medium text-rose-600 border border-rose-200 hover:bg-rose-50 rounded-lg px-2.5 py-1.5">Delete</button>
+          <div class="flex items-center gap-2">
+            <div v-if="selectedIds.size" class="flex items-center gap-2">
+              <span class="text-xs text-slate-400">{{ selectedIds.size }} selected</span>
+              <button @click="bulkDuplicate" :disabled="busy" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Duplicate</button>
+              <button @click="bulkExport" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Export</button>
+              <button @click="bulkArchive" :disabled="busy" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Archive</button>
+              <button @click="bulkDelete" :disabled="busy" class="text-xs font-medium text-rose-600 border border-rose-200 hover:bg-rose-50 rounded-lg px-2.5 py-1.5">Delete</button>
+            </div>
+            <ViewModeToggle v-model="viewMode" />
           </div>
         </div>
 
         <div v-if="loading" class="text-slate-400 text-sm">Loading…</div>
         <div v-else-if="!reports.length" class="text-slate-400 text-sm">No reports yet.</div>
         <div v-else-if="!filteredReports.length" class="text-slate-400 text-sm">No reports match.</div>
-        <div v-else class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div v-else-if="viewMode === 'card'" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           <div v-for="r in filteredReports" :key="r.id" class="relative bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-2 hover:border-slate-200 transition"
             :class="r.archived_at ? 'opacity-50' : ''"
             :style="{ borderLeft: `4px solid ${STATUS_ACCENT[r.status] ?? '#94A3B8'}` }">
@@ -1288,6 +1294,76 @@ onUnmounted(() => { window.removeEventListener('mousemove', onResizeMove); windo
             <div class="text-xs text-slate-400 cursor-pointer" @click="openReport(r)">{{ r.project?.name ?? 'global' }}</div>
             <div class="text-xs text-slate-400 mt-auto cursor-pointer" @click="openReport(r)">by {{ r.creator?.name ?? '—' }}</div>
           </div>
+        </div>
+
+        <!-- Tabular listing — same fields/actions as the cards above, one row per report -->
+        <div v-else class="overflow-x-auto border border-slate-100 rounded-xl">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="bg-slate-50 text-left text-xs text-slate-500">
+                <th class="px-3 py-2 border-b border-slate-200 w-8">
+                  <input type="checkbox" :checked="allSelected" @change="toggleSelectAll" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" />
+                </th>
+                <th class="px-3 py-2 border-b border-slate-200">Name</th>
+                <th class="px-3 py-2 border-b border-slate-200">Type · Dataset</th>
+                <th class="px-3 py-2 border-b border-slate-200">Project</th>
+                <th class="px-3 py-2 border-b border-slate-200">Status</th>
+                <th class="px-3 py-2 border-b border-slate-200">Tags</th>
+                <th class="px-3 py-2 border-b border-slate-200">By</th>
+                <th class="px-3 py-2 border-b border-slate-200">Updated</th>
+                <th class="px-3 py-2 border-b border-slate-200 w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in filteredReports" :key="r.id" class="hover:bg-slate-50 transition"
+                :class="r.archived_at ? 'opacity-50' : ''">
+                <td class="px-3 py-2 border-b border-slate-100" @click.stop>
+                  <input type="checkbox" :checked="selectedIds.has(r.id)" @change="toggleSelect(r.id)"
+                    class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" />
+                </td>
+                <td class="px-3 py-2 border-b border-slate-100 cursor-pointer" @click="openReport(r)">
+                  <div class="font-semibold text-slate-700">{{ r.name }}</div>
+                  <p v-if="r.description" class="text-xs text-slate-400 line-clamp-1">{{ r.description }}</p>
+                </td>
+                <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 cursor-pointer" @click="openReport(r)">
+                  {{ r.type }} · {{ r.dataset?.name ?? 'no dataset' }}
+                </td>
+                <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 cursor-pointer" @click="openReport(r)">{{ r.project?.name ?? 'global' }}</td>
+                <td class="px-3 py-2 border-b border-slate-100">
+                  <span v-if="r.archived_at" class="text-[10px] rounded-full px-1.5 py-0.5 bg-slate-200 text-slate-500 mr-1">archived</span>
+                  <span class="text-xs font-medium rounded-full px-2 py-0.5" :class="STATUS_BADGE[r.status] ?? 'bg-slate-100 text-slate-500'">{{ r.status }}</span>
+                </td>
+                <td class="px-3 py-2 border-b border-slate-100">
+                  <div class="flex flex-wrap gap-1">
+                    <span v-for="tag in r.tags ?? []" :key="tag" class="text-[10px] bg-airr-50 text-airr-600 rounded-full px-2 py-0.5">#{{ tag }}</span>
+                  </div>
+                </td>
+                <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 cursor-pointer" @click="openReport(r)">{{ r.creator?.name ?? '—' }}</td>
+                <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-400 cursor-pointer" @click="openReport(r)">
+                  {{ r.updated_at ? new Date(r.updated_at).toLocaleDateString() : '—' }}
+                </td>
+                <td class="px-3 py-2 border-b border-slate-100 text-right">
+                  <div class="relative inline-block">
+                    <button @click.stop="toggleMenu(r.id)" class="text-slate-400 hover:text-slate-600 px-1 rounded hover:bg-slate-100">⋮</button>
+                    <div v-if="openMenuId === r.id"
+                      class="absolute right-0 top-full mt-1 w-40 bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-1 text-xs text-left">
+                      <button @click.stop="duplicateReport(r)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Duplicate</button>
+                      <button @click.stop="exportReport(r)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Export</button>
+                      <button @click.stop="openCardLog(r)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Log</button>
+                      <button @click.stop="copyReportUrl(r)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Copy URL</button>
+                      <button @click.stop="toggleDebug(r.id); openMenuId = null" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">
+                        {{ debugIds.has(r.id) ? '✓ Debug mode' : 'Debug mode' }}
+                      </button>
+                      <div class="border-t border-slate-100 my-1"></div>
+                      <button v-if="!r.archived_at" @click.stop="archiveReport(r)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Archive</button>
+                      <button v-else @click.stop="unarchiveReport(r)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Unarchive</button>
+                      <button @click.stop="deleteReportCard(r)" class="w-full text-left px-3 py-1.5 hover:bg-rose-50 text-rose-600">Delete</button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <!-- Deleted reports -->

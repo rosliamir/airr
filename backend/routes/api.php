@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\AiController;
+use App\Http\Controllers\Api\AnnouncementController;
 use App\Http\Controllers\Api\ConstantController;
+use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\OrchestrationController;
 use App\Http\Controllers\Api\TemplateController;
 use App\Http\Controllers\Api\AuditController;
@@ -19,6 +21,7 @@ use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SavedViewController;
 use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\SystemController;
+use App\Http\Controllers\Api\TaskController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
@@ -168,6 +171,45 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('saved-views/{savedView}', [SavedViewController::class, 'destroy'])->middleware('permission:reports.run');
     Route::post('saved-views/{savedView}/run', [SavedViewController::class, 'run'])->middleware('permission:reports.run');
     Route::post('saved-views/{savedView}/generate-from-prompt', [SavedViewController::class, 'generateFromPrompt'])->middleware('permission:reports.run');
+    Route::post('saved-views/{savedView}/reset', [SavedViewController::class, 'reset'])->middleware('permission:reports.run');
+    Route::post('saved-views/{savedView}/restore', [SavedViewController::class, 'restore'])->middleware('permission:reports.run');
+
+    // Dashboards (new module) — widget-based dashboard authoring, mirrors Reports.
+    Route::middleware('permission:dashboards.view')->group(function () {
+        Route::get('dashboards', [DashboardController::class, 'index']);
+        Route::get('dashboards/{dashboard}', [DashboardController::class, 'show']);
+    });
+    Route::post('dashboards/{dashboard}/run', [DashboardController::class, 'run'])->middleware('permission:dashboards.run');
+    Route::middleware('permission:dashboards.create')->group(function () {
+        Route::post('dashboards', [DashboardController::class, 'store']);
+    });
+    Route::middleware('permission:dashboards.edit')->group(function () {
+        Route::put('dashboards/{dashboard}', [DashboardController::class, 'update']);
+        Route::delete('dashboards/{dashboard}', [DashboardController::class, 'destroy']);
+        Route::get('dashboards/{dashboard}/permissions', [DashboardController::class, 'permissions']);
+        Route::put('dashboards/{dashboard}/permissions', [DashboardController::class, 'syncPermissions']);
+    });
+
+    // Tasks (dashboard widget data source)
+    Route::middleware('permission:tasks.view')->group(function () {
+        Route::get('tasks', [TaskController::class, 'index']);
+    });
+    Route::middleware('permission:tasks.manage')->group(function () {
+        Route::post('tasks', [TaskController::class, 'store']);
+        Route::put('tasks/{task}', [TaskController::class, 'update']);
+        Route::delete('tasks/{task}', [TaskController::class, 'destroy']);
+    });
+
+    // Announcements (dashboard widget data source)
+    Route::middleware('permission:announcements.view')->group(function () {
+        Route::get('announcements', [AnnouncementController::class, 'index']);
+    });
+    Route::middleware('permission:announcements.manage')->group(function () {
+        Route::post('announcements', [AnnouncementController::class, 'store']);
+        Route::put('announcements/{announcement}', [AnnouncementController::class, 'update']);
+        Route::delete('announcements/{announcement}', [AnnouncementController::class, 'destroy']);
+    });
+
     Route::middleware('permission:reports.create')->group(function () {
         Route::post('reports', [ReportController::class, 'store']);
         Route::post('reports/import', [ReportController::class, 'import']);

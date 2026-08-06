@@ -92,7 +92,7 @@ class ReportTest extends TestCase
 
     public function test_report_without_grant_is_private_to_creator(): void
     {
-        $owner = User::factory()->create(['user_type' => User::TYPE_USER]);
+        $owner = User::factory()->create(['user_type' => User::TYPE_USER_LEVEL_1]);
         $report = Report::create(['name' => 'Secret', 'type' => 'table', 'created_by' => $owner->id]);
 
         $this->actingWithPermissions(['reports.view', 'reports.run']); // a different, non-admin user
@@ -102,7 +102,7 @@ class ReportTest extends TestCase
 
     public function test_role_grant_gives_view_access(): void
     {
-        $owner = User::factory()->create(['user_type' => User::TYPE_USER]);
+        $owner = User::factory()->create(['user_type' => User::TYPE_USER_LEVEL_1]);
         $report = Report::create(['name' => 'Shared', 'type' => 'table', 'created_by' => $owner->id]);
 
         $viewer = $this->actingWithPermissions(['reports.view']);
@@ -114,7 +114,7 @@ class ReportTest extends TestCase
 
     public function test_run_requires_can_run_grant(): void
     {
-        $owner = User::factory()->create(['user_type' => User::TYPE_USER]);
+        $owner = User::factory()->create(['user_type' => User::TYPE_USER_LEVEL_1]);
         $report = Report::create(['name' => 'NoRun', 'type' => 'table', 'created_by' => $owner->id]);
 
         $viewer = $this->actingWithPermissions(['reports.view', 'reports.run']);
@@ -143,6 +143,22 @@ class ReportTest extends TestCase
         ])->assertCreated();
 
         $this->assertDatabaseHas('report_role', ['role_id' => $role->id, 'can_edit' => true]);
+    }
+
+    public function test_chart_report_also_renders_data_table_beneath(): void
+    {
+        $this->actingWithPermissions(['reports.run']);
+        $report = $this->fileReport([
+            'type' => 'chart',
+            'columns' => [['field' => 'region'], ['field' => 'amount', 'format' => 'number']],
+            'groups' => [['field' => 'region']],
+            'aggregates' => [['field' => 'amount', 'fn' => 'sum']],
+        ], "region,amount\nNorth,100\nSouth,200\n");
+
+        $html = $this->postJson("/api/reports/{$report->id}/run")->assertOk()->json('data.html');
+        $this->assertStringContainsString('<svg', $html);
+        $this->assertStringContainsString('<table', $html);
+        $this->assertStringContainsString('North', $html);
     }
 
     public function test_runs_kpi_report(): void

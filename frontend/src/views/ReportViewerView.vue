@@ -20,7 +20,7 @@ type SavedView = {
   id: number; report_id: number; name: string
   definition: Record<string, unknown>
   prompt: string | null
-  prompt_history: { text: string; at: string }[]
+  prompt_history: { text: string; at: string; before?: unknown }[]
   report: { id: number; name: string } | null
 }
 
@@ -62,7 +62,9 @@ const promptText = ref('')
 const promptFile = ref<File | null>(null)
 const promptBusy = ref(false)
 const promptError = ref('')
-const promptHistory = ref<{ text: string; at: string }[]>([])
+const promptHistory = ref<{ text: string; at: string; before?: unknown }[]>([])
+const resetBusy = ref(false)
+const restoreBusy = ref<number | null>(null)
 // Collapsed to a small toggle button by default — opens into a dockable
 // panel the user can place on any side of the page.
 const promptOpen = ref(false)
@@ -212,6 +214,40 @@ async function saveView() {
 function copyShareUrl() {
   if (shareUrl.value) navigator.clipboard?.writeText(shareUrl.value)
 }
+
+// ── Reset / History — discard AI customization back to the source report,
+// or step back to how things looked right before a specific past prompt.
+async function resetView() {
+  if (!savedView.value) return
+  if (!confirm('Reset this view back to the report as it currently is? Your prompt history stays, but all customization is discarded.')) return
+  resetBusy.value = true
+  try {
+    savedView.value = (await apiRequest<{ data: SavedView }>(`/saved-views/${savedView.value.id}/reset`, { method: 'POST' })).data
+    definition.value = savedView.value.definition
+    promptHistory.value = savedView.value.prompt_history ?? []
+    await runReport()
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Reset failed'
+  } finally {
+    resetBusy.value = false
+  }
+}
+async function restorePrompt(index: number) {
+  if (!savedView.value) return
+  restoreBusy.value = index
+  try {
+    savedView.value = (await apiRequest<{ data: SavedView }>(`/saved-views/${savedView.value.id}/restore`, {
+      method: 'POST', body: JSON.stringify({ index }),
+    })).data
+    definition.value = savedView.value.definition
+    promptHistory.value = savedView.value.prompt_history ?? []
+    await runReport()
+  } catch (e) {
+    error.value = e instanceof ApiException ? e.error.message : 'Restore failed'
+  } finally {
+    restoreBusy.value = null
+  }
+}
 // Always available (unlike the Shareable link row, which only appears once a
 // saved view exists) — copies whatever URL is currently open, report or saved view.
 function copyPageLink() {
@@ -280,11 +316,17 @@ async function exportReport(format: 'csv' | 'excel') {
         </div>
         <p v-if="promptError" class="text-xs text-airr-700 bg-airr-50 rounded-lg px-2 py-1.5">{{ promptError }}</p>
         <div v-if="promptHistory.length" class="pt-2 border-t border-slate-100 space-y-1">
-          <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Previous prompts</p>
-          <button v-for="(p, i) in [...promptHistory].reverse()" :key="i" @click="usePreviousPrompt(p.text)"
-            class="block w-full text-left text-[11px] text-slate-500 hover:bg-slate-50 rounded px-2 py-1 truncate" :title="p.text">
-            {{ p.text }}
-          </button>
+          <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wide">History</p>
+          <div v-for="(p, i) in promptHistory.map((p, i) => ({ ...p, i })).reverse()" :key="i"
+            class="flex items-start gap-1.5 text-[11px] text-slate-500 hover:bg-slate-50 rounded px-2 py-1">
+            <button @click="usePreviousPrompt(p.text)" class="flex-1 min-w-0 text-left truncate" :title="p.text">
+              {{ p.text }}
+              <span class="block text-[10px] text-slate-400">{{ new Date(p.at).toLocaleString() }}</span>
+            </button>
+            <button v-if="p.before" @click="restorePrompt(p.i)" :disabled="restoreBusy === p.i" class="shrink-0 text-airr-600 hover:underline disabled:opacity-50">
+              {{ restoreBusy === p.i ? '…' : 'Restore' }}
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -300,6 +342,7 @@ async function exportReport(format: 'csv' | 'excel') {
             <button @click="printReport" :disabled="!html" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5 disabled:opacity-40">Print / PDF</button>
             <button @click="exportReport('csv')" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5">Export CSV</button>
             <button @click="exportReport('excel')" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5">Export Excel</button>
+            <button v-if="savedView" @click="resetView" :disabled="resetBusy" title="Discard all prompt customization, back to the report as it currently is" class="text-xs font-medium text-slate-500 border border-slate-200 hover:bg-slate-50 rounded-lg px-3 py-1.5 disabled:opacity-50">{{ resetBusy ? 'Resetting…' : 'Reset' }}</button>
             <button @click="saveView" :disabled="saveBusy" class="text-xs font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5 disabled:opacity-50">{{ saveBusy ? 'Saving…' : 'Save' }}</button>
             <!-- Collapsed by default — just this toggle button, per request -->
             <button @click="promptOpen = !promptOpen" title="AI Prompt"
@@ -393,11 +436,17 @@ async function exportReport(format: 'csv' | 'excel') {
         </div>
         <p v-if="promptError" class="text-xs text-airr-700 bg-airr-50 rounded-lg px-2 py-1.5">{{ promptError }}</p>
         <div v-if="promptHistory.length" class="pt-2 border-t border-slate-100 space-y-1">
-          <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Previous prompts</p>
-          <button v-for="(p, i) in [...promptHistory].reverse()" :key="i" @click="usePreviousPrompt(p.text)"
-            class="block w-full text-left text-[11px] text-slate-500 hover:bg-slate-50 rounded px-2 py-1 truncate" :title="p.text">
-            {{ p.text }}
-          </button>
+          <p class="text-[10px] font-medium text-slate-400 uppercase tracking-wide">History</p>
+          <div v-for="(p, i) in promptHistory.map((p, i) => ({ ...p, i })).reverse()" :key="i"
+            class="flex items-start gap-1.5 text-[11px] text-slate-500 hover:bg-slate-50 rounded px-2 py-1">
+            <button @click="usePreviousPrompt(p.text)" class="flex-1 min-w-0 text-left truncate" :title="p.text">
+              {{ p.text }}
+              <span class="block text-[10px] text-slate-400">{{ new Date(p.at).toLocaleString() }}</span>
+            </button>
+            <button v-if="p.before" @click="restorePrompt(p.i)" :disabled="restoreBusy === p.i" class="shrink-0 text-airr-600 hover:underline disabled:opacity-50">
+              {{ restoreBusy === p.i ? '…' : 'Restore' }}
+            </button>
+          </div>
         </div>
       </aside>
     </div>

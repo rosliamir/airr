@@ -17,6 +17,8 @@ import MenusView from '../views/MenusView.vue'
 import AiOrchestrationView from '../views/AiOrchestrationView.vue'
 import TemplatesView from '../views/TemplatesView.vue'
 import ReportViewerView from '../views/ReportViewerView.vue'
+import DashboardsView from '../views/DashboardsView.vue'
+import DashboardViewerView from '../views/DashboardViewerView.vue'
 import ComingSoonView from '../views/ComingSoonView.vue'
 
 // Real views for the modules that are already built.
@@ -32,6 +34,7 @@ const readyViews: Record<string, () => unknown> = {
   menus: () => MenusView,
   'ai-orchestration': () => AiOrchestrationView,
   templates: () => TemplatesView,
+  dashboards: () => DashboardsView,
 }
 
 // Build protected routes from the menu config so the two never drift.
@@ -61,6 +64,7 @@ const router = createRouter({
     { path: '/reset-password', name: 'reset-password', component: ResetPasswordView, meta: { guestOnly: true, title: 'Reset password' } },
     { path: '/reports/:id/view', name: 'report-view', component: ReportViewerView, meta: { requiresAuth: true, title: 'Report', permission: 'reports.run' } },
     { path: '/views/:savedViewId', name: 'saved-view', component: ReportViewerView, meta: { requiresAuth: true, title: 'Report', permission: 'reports.run' } },
+    { path: '/dashboards/:id', name: 'dashboard-viewer', component: DashboardViewerView, meta: { requiresAuth: true, title: 'Dashboard', permission: 'dashboards.view' } },
     ...menuRoutes,
   ],
 })

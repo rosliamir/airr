@@ -25,7 +25,7 @@ class AdminCrudTest extends TestCase
 
     public function test_project_listing_is_owner_scoped_for_non_admin(): void // FR-M14.3
     {
-        $other = User::factory()->create(['user_type' => User::TYPE_USER]);
+        $other = User::factory()->create(['user_type' => User::TYPE_USER_LEVEL_1]);
         Project::create(['code' => 'OTHER', 'name' => 'Not mine', 'status' => 'active', 'created_by' => $other->id]);
 
         $viewer = $this->actingWithPermissions(['projects.view', 'projects.manage']);
@@ -50,7 +50,7 @@ class AdminCrudTest extends TestCase
 
         $this->postJson('/api/users', [
             'name' => 'Staff', 'email' => 'staff@example.com',
-            'password' => 'Password123!', 'user_type' => User::TYPE_USER,
+            'password' => 'Password123!', 'user_type' => User::TYPE_USER_LEVEL_1,
         ])->assertCreated()->assertJsonPath('data.email', 'staff@example.com');
 
         $this->assertDatabaseHas('users', ['email' => 'staff@example.com']);

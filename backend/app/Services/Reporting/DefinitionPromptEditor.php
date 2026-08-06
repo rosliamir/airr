@@ -67,8 +67,14 @@ class DefinitionPromptEditor
         if (empty($decoded['narrative']) && ! empty($existingDefinition['narrative'])) {
             $decoded['narrative'] = $existingDefinition['narrative'];
         }
+        // "before" is a snapshot of the definition as it stood immediately
+        // before this prompt was applied — restoring a history entry means
+        // reverting to this. Stripped of its own nested prompt_history/before
+        // (which would otherwise nest deeper and larger with every prompt).
+        $before = $existingDefinition;
+        unset($before['prompt_history']);
         $promptHistory = (array) ($existingDefinition['prompt_history'] ?? []);
-        $promptHistory[] = ['text' => $prompt, 'at' => now()->toIso8601String()];
+        $promptHistory[] = ['text' => $prompt, 'at' => now()->toIso8601String(), 'before' => $before];
         $decoded['prompt_history'] = $promptHistory;
 
         return $decoded;
@@ -145,9 +151,25 @@ not invent other keys, they will be silently ignored:
       {{PROJECT|KEY}} (uppercase key) instead of a hardcoded number — e.g. "jumlah_bayaran * {{GLOBAL|SST}}"
       for "SST = jumlah_bayaran times the SST constant". Use this whenever the instruction names a
       constant/setting by name rather than giving a literal number.
-  Adding a brand-new column (plain or calc), or removing one, is fine — see the CRITICAL RULE below for
-  what "editing" a column vs "adding" one means for the REST of the columns array.
+    - bucket + source: classifies a NUMERIC field into named ranges/bands instead of grouping by its
+      exact value — this is what "group by amount >= 1000 vs below 1000", "band ages into 0-18/19-40/
+      41+", "split into 2 groups: RM1000 and above, and below" mean. Give the bucket column a NEW unique
+      "field" name (like a calc column), set "source" to the EXISTING numeric field being classified, and
+      "bucket" to an array of {op, value, label} rules — op is one of = | != | > | < | >= | <=, evaluated
+      in array order with the FIRST matching rule winning, so put narrower/higher thresholds first, e.g.
+      for "RM1000 and above" vs "below RM1000" on field order_amt:
+      {"field":"amount_band","label":"Amount Band","source":"order_amt","bucket":[
+        {"op":">=","value":1000,"label":"RM1,000 and above"},{"op":"<","value":1000,"label":"Below RM1,000"}
+      ]}
+      A bucket column's "field" can then be used as groups[0].field (for type=grouped or type=chart) to
+      group/plot rows by band instead of by exact value — this is the only correct way to satisfy an
+      instruction asking to group/split rows by a numeric threshold or range; do NOT try to fake this with
+      value_map (value_map only matches exact raw values, not ranges) or invent an unsupported key.
+  Adding a brand-new column (plain, calc, or bucket), or removing one, is fine — see the CRITICAL RULE
+  below for what "editing" a column vs "adding" one means for the REST of the columns array.
 - groups: array of {field} — for type=grouped, groups rows by the first entry's field, with subtotals.
+  To group by a numeric range/threshold (not an exact value), first add a bucket column (see "bucket"
+  above) and set groups[0].field to that bucket column's field name.
 - aggregates: array of {field, fn, label} — fn is one of sum|avg|min|max|count. Used for KPI cards and
   group/grand totals.
 - filters, sorts: array, kept as-is unless the instruction asks to change them.

@@ -784,6 +784,13 @@ class ReportController extends Controller
             'definition.columns.*.calc'  => 'nullable|string|max:500',
             'definition.columns.*.align' => ['nullable', Rule::in(['left', 'right', 'center'])],
             'definition.columns.*.hidden' => 'nullable|boolean',
+            // Numeric-range classifier (e.g. "amount >= 1000 -> RM1,000 and above")
+            // usable as a groups/chart field — see ReportRenderer::bucketValue().
+            'definition.columns.*.source' => 'nullable|string|max:120',
+            'definition.columns.*.bucket' => 'nullable|array',
+            'definition.columns.*.bucket.*.op' => ['nullable', Rule::in(['=', '==', '!=', '>', '<', '>=', '<='])],
+            'definition.columns.*.bucket.*.value' => 'nullable',
+            'definition.columns.*.bucket.*.label' => 'nullable|string|max:160',
             'definition.groups'      => 'nullable|array',
             'definition.aggregates'  => 'nullable|array',
             'definition.filters'     => 'nullable|array',

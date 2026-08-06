@@ -4,6 +4,8 @@ import AdminLayout from '../layouts/AdminLayout.vue'
 import { apiRequest, ApiException, uploadFile } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import DatasetPanel from '../components/datasources/DatasetPanel.vue'
+import { useListViewMode } from '../composables/useListViewMode'
+import ViewModeToggle from '../components/ViewModeToggle.vue'
 
 type Project = { id: number; code: string; name: string }
 type DataSource = {
@@ -40,6 +42,8 @@ const error = ref('')
 const busyId = ref<number | null>(null)
 const testMsg = ref<{ id: number; ok: boolean; message: string } | null>(null)
 const schema = ref<{ id: number; tables: { table: string; columns: { name: string; type: string }[] }[] } | null>(null)
+
+const { viewMode } = useListViewMode('datasources')
 
 // Search
 const search = ref('')
@@ -315,16 +319,18 @@ onMounted(load)
             {{ testingAll ? 'Testing…' : 'Test all' }}
           </button>
           <button @click="openCreate" class="text-sm font-medium text-white bg-airr-500 hover:bg-airr-600 rounded-lg px-3 py-1.5">+ New Data Source</button>
+          <ViewModeToggle v-model="viewMode" />
         </div>
+        <ViewModeToggle v-else v-model="viewMode" />
       </div>
 
       <p v-if="error" class="text-sm text-airr-700 bg-airr-50 rounded-lg px-3 py-2">{{ error }}</p>
 
       <!-- Active sources -->
-      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <div v-if="loading" class="text-slate-400 text-sm">Loading…</div>
-        <div v-else-if="!activeSources.length && !search" class="text-slate-400 text-sm">No data sources yet.</div>
-        <div v-else-if="!activeSources.length" class="text-slate-400 text-sm">No results for "{{ search }}".</div>
+      <div v-if="loading" class="text-slate-400 text-sm">Loading…</div>
+      <div v-else-if="!activeSources.length && !search" class="text-slate-400 text-sm">No data sources yet.</div>
+      <div v-else-if="!activeSources.length" class="text-slate-400 text-sm">No results for "{{ search }}".</div>
+      <div v-else-if="viewMode === 'card'" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <div v-for="d in activeSources" :key="d.id"
           class="bg-white rounded-xl border p-4 flex flex-col gap-2 cursor-pointer transition"
           :class="selected?.id === d.id ? 'border-airr-400 ring-1 ring-airr-200' : 'border-slate-100 hover:border-slate-200'"
@@ -356,6 +362,55 @@ onMounted(load)
             <button @click="remove(d)" :disabled="busyId === d.id" class="text-xs text-rose-600 hover:underline">Delete</button>
           </div>
         </div>
+      </div>
+
+      <!-- Tabular listing — same fields/actions as the cards above, one row per data source -->
+      <div v-else class="overflow-x-auto border border-slate-100 rounded-xl">
+        <table class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="bg-slate-50 text-left text-xs text-slate-500">
+              <th class="px-3 py-2 border-b border-slate-200">Name · Type</th>
+              <th class="px-3 py-2 border-b border-slate-200">Location</th>
+              <th class="px-3 py-2 border-b border-slate-200">Project</th>
+              <th class="px-3 py-2 border-b border-slate-200">Status</th>
+              <th class="px-3 py-2 border-b border-slate-200">Datasets</th>
+              <th class="px-3 py-2 border-b border-slate-200 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="d in activeSources" :key="d.id" class="hover:bg-slate-50 transition cursor-pointer"
+              :class="selected?.id === d.id ? 'bg-airr-50/50' : ''"
+              @click="selected = d">
+              <td class="px-3 py-2 border-b border-slate-100">
+                <div class="font-semibold text-slate-700">{{ d.name }}</div>
+                <div class="text-xs text-slate-400">{{ typeLabel(d.type) }}</div>
+              </td>
+              <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 truncate max-w-xs">
+                <template v-if="d.is_file">{{ d.config_summary.original_name ?? 'no file' }}<span v-if="d.config_summary.row_count"> · {{ d.config_summary.row_count }} rows</span></template>
+                <template v-else-if="d.is_database">{{ d.config_summary.host }}/{{ d.config_summary.database ?? d.config_summary.service_name }}</template>
+                <template v-else>{{ d.config_summary.base_url }}</template>
+              </td>
+              <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-500">{{ d.project?.code ?? 'no project' }}</td>
+              <td class="px-3 py-2 border-b border-slate-100">
+                <span class="text-xs font-medium rounded-full px-2 py-0.5" :class="statusBadge[d.status]">{{ d.status }}</span>
+                <p v-if="testMsg && testMsg.id === d.id" class="text-xs rounded px-2 py-1 mt-1" :class="testMsg.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'">
+                  {{ testMsg.message }}
+                </p>
+              </td>
+              <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-500">{{ d.datasets_count }}</td>
+              <td class="px-3 py-2 border-b border-slate-100 text-right" @click.stop>
+                <div v-if="canManage" class="flex flex-wrap justify-end gap-3">
+                  <button v-if="d.is_file" @click="openUpload(d)" :disabled="busyId === d.id" class="text-xs text-airr-600 hover:underline font-medium">Upload</button>
+                  <button @click="test(d)" :disabled="busyId === d.id" class="text-xs text-airr-600 hover:underline">Test</button>
+                  <button v-if="d.is_database" @click="introspect(d)" :disabled="busyId === d.id" class="text-xs text-airr-600 hover:underline">Introspect</button>
+                  <button @click="openEdit(d)" class="text-xs text-slate-500 hover:underline">Edit</button>
+                  <button @click="openLog(d)" class="text-xs text-slate-500 hover:underline">Log</button>
+                  <button @click="remove(d)" :disabled="busyId === d.id" class="text-xs text-rose-600 hover:underline">Delete</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- Deleted sources -->

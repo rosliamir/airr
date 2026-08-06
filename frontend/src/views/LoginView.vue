@@ -30,20 +30,28 @@ function googleSignIn() {
   window.location.href = '/api/auth/google/redirect'
 }
 
-// Handle the Google OAuth redirect back into the SPA (?token=… or ?error=…).
+// Handle a token handoff back into the SPA — Google OAuth or KERISI SSO
+// (?token=…&redirect=…, or ?error=…). `redirect` must be an internal path.
 onMounted(async () => {
   const params = new URLSearchParams(window.location.search)
   const token = params.get('token')
   if (token) {
     try {
       await auth.adoptToken(token)
-      router.replace({ name: 'dashboard' })
+      const redirect = params.get('redirect')
+      if (redirect && redirect.startsWith('/') && !redirect.includes('://')) {
+        router.replace(redirect)
+      } else {
+        router.replace({ name: 'dashboard' })
+      }
       return
     } catch {
-      error.value = 'Google sign-in failed. Please try again.'
+      error.value = 'Sign-in failed. Please try again.'
     }
   }
-  if (params.get('error') === 'google') {
+  if (params.get('error')?.startsWith('sso')) {
+    error.value = 'KERISI sign-in failed. Please try again or log in with your AIRR credentials.'
+  } else if (params.get('error') === 'google') {
     error.value = 'Google sign-in failed. Please try again.'
   }
   // Strip query so a refresh doesn't replay the redirect params.

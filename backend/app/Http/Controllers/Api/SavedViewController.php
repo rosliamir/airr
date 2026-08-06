@@ -87,6 +87,41 @@ class SavedViewController extends Controller
         return $this->sendNoContent();
     }
 
+    // Discards all AI/prompt customization and starts over from the source
+    // report's CURRENT definition — keeps the prompt_history log (so what
+    // was tried is still visible) rather than deleting it outright.
+    public function reset(Request $request, SavedView $savedView): JsonResponse
+    {
+        $this->authorizeOwner($request, $savedView);
+        $report = $savedView->report;
+        $freshDefinition = (array) ($report->definition ?? []);
+        $freshDefinition['prompt_history'] = (array) ($savedView->definition['prompt_history'] ?? []);
+        $savedView->update(['definition' => $freshDefinition, 'prompt' => null]);
+        $this->audit->log('saved_view.reset', SavedView::class, $savedView->id);
+
+        return $this->sendOk($this->row($savedView->fresh()));
+    }
+
+    // Reverts to the definition snapshot captured just before a given past
+    // prompt was applied (see DefinitionPromptEditor — each prompt_history
+    // entry carries a "before" snapshot for exactly this).
+    public function restore(Request $request, SavedView $savedView): JsonResponse
+    {
+        $this->authorizeOwner($request, $savedView);
+        $data = $request->validate(['index' => 'required|integer|min:0']);
+        $history = (array) ($savedView->definition['prompt_history'] ?? []);
+        $entry = $history[$data['index']] ?? null;
+        if (! $entry || ! isset($entry['before'])) {
+            return $this->sendError(404, 'HISTORY_ENTRY_NOT_FOUND', 'That history entry has no earlier state to restore.');
+        }
+        $restored = $entry['before'];
+        $restored['prompt_history'] = $history; // keep the log intact — restoring isn't erasing history
+        $savedView->update(['definition' => $restored]);
+        $this->audit->log('saved_view.restored', SavedView::class, $savedView->id, null, ['index' => $data['index']]);
+
+        return $this->sendOk($this->row($savedView->fresh()));
+    }
+
     public function index(Request $request, Report $report): JsonResponse
     {
         $this->authorizeRun($request, $report);

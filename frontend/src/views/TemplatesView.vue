@@ -5,6 +5,8 @@ import RichEditor from '../components/RichEditor.vue'
 import ConstantsPanel from '../components/ConstantsPanel.vue'
 import { apiRequest, uploadFile, downloadFile, ApiException } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useListViewMode } from '../composables/useListViewMode'
+import ViewModeToggle from '../components/ViewModeToggle.vue'
 
 type Group = { level: number; header: string | null; footer: string | null }
 type DataSourceOpt = { id: number; name: string }
@@ -46,6 +48,7 @@ const filteredTemplates = computed(() => templates.value.filter(t => {
 const deletedTemplates = ref<Template[]>([])
 
 // Bulk selection + sort + archive toggle (mirrors ReportsView).
+const { viewMode } = useListViewMode('templates')
 const selectedIds = ref<Set<number>>(new Set())
 const showArchived = ref(false)
 const sortBy = ref<'-updated_at' | 'updated_at' | 'name' | '-name'>('-updated_at')
@@ -436,11 +439,12 @@ onMounted(load)
           <button @click="bulkArchive" :disabled="busy" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Archive</button>
           <button @click="bulkDelete" :disabled="busy" class="text-xs font-medium text-rose-600 border border-rose-200 hover:bg-rose-50 rounded-lg px-2.5 py-1.5">Delete</button>
         </div>
+        <ViewModeToggle v-model="viewMode" />
       </div>
 
-      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <div v-if="loading" class="text-slate-400 text-sm">Loading…</div>
-        <div v-else-if="!sortedTemplates.length" class="text-slate-400 text-sm">No templates match.</div>
+      <div v-if="loading" class="text-slate-400 text-sm">Loading…</div>
+      <div v-else-if="!sortedTemplates.length" class="text-slate-400 text-sm">No templates match.</div>
+      <div v-else-if="viewMode === 'card'" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <div v-for="t in sortedTemplates" :key="t.id" class="relative bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-2 hover:border-slate-200 transition"
           :class="t.archived_at ? 'opacity-50' : ''">
           <div class="flex items-start justify-between gap-2">
@@ -477,6 +481,68 @@ onMounted(load)
           </div>
           <div class="text-xs text-slate-400 mt-auto cursor-pointer" @click="openEdit(t)">by {{ t.creator?.name ?? '—' }}</div>
         </div>
+      </div>
+
+      <!-- Tabular listing — same fields/actions as the cards above, one row per template -->
+      <div v-else class="overflow-x-auto border border-slate-100 rounded-xl">
+        <table class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="bg-slate-50 text-left text-xs text-slate-500">
+              <th class="px-3 py-2 border-b border-slate-200 w-8">
+                <input type="checkbox" :checked="allSelected" @change="toggleSelectAll" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" />
+              </th>
+              <th class="px-3 py-2 border-b border-slate-200">Name</th>
+              <th class="px-3 py-2 border-b border-slate-200">Project</th>
+              <th class="px-3 py-2 border-b border-slate-200">Scope</th>
+              <th class="px-3 py-2 border-b border-slate-200">Tags</th>
+              <th class="px-3 py-2 border-b border-slate-200">By</th>
+              <th class="px-3 py-2 border-b border-slate-200">Updated</th>
+              <th class="px-3 py-2 border-b border-slate-200 w-8"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="t in sortedTemplates" :key="t.id" class="hover:bg-slate-50 transition"
+              :class="t.archived_at ? 'opacity-50' : ''">
+              <td class="px-3 py-2 border-b border-slate-100" @click.stop>
+                <input type="checkbox" :checked="selectedIds.has(t.id)" @change="toggleSelect(t.id)"
+                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" />
+              </td>
+              <td class="px-3 py-2 border-b border-slate-100 cursor-pointer" @click="openEdit(t)">
+                <div class="font-semibold text-slate-700">{{ t.name }}</div>
+                <p v-if="t.description" class="text-xs text-slate-400 line-clamp-1">{{ t.description }}</p>
+              </td>
+              <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 cursor-pointer" @click="openEdit(t)">{{ t.project?.code ?? 'global' }}</td>
+              <td class="px-3 py-2 border-b border-slate-100">
+                <span v-if="t.archived_at" class="text-[10px] rounded-full px-1.5 py-0.5 bg-slate-200 text-slate-500 mr-1">archived</span>
+                <span class="text-xs font-medium rounded-full px-2 py-0.5" :class="t.scope === 'global' ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-700'">{{ t.scope }}</span>
+              </td>
+              <td class="px-3 py-2 border-b border-slate-100">
+                <div class="flex flex-wrap gap-1">
+                  <span v-for="tag in t.tags ?? []" :key="tag" class="text-[10px] bg-airr-50 text-airr-600 rounded-full px-2 py-0.5">#{{ tag }}</span>
+                </div>
+              </td>
+              <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 cursor-pointer" @click="openEdit(t)">{{ t.creator?.name ?? '—' }}</td>
+              <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-400 cursor-pointer" @click="openEdit(t)">
+                {{ t.updated_at ? new Date(t.updated_at).toLocaleDateString() : '—' }}
+              </td>
+              <td class="px-3 py-2 border-b border-slate-100 text-right">
+                <div class="relative inline-block">
+                  <button @click.stop="toggleMenu(t.id)" class="text-slate-400 hover:text-slate-600 px-1 rounded hover:bg-slate-100">⋮</button>
+                  <div v-if="openMenuId === t.id"
+                    class="absolute right-0 top-full mt-1 w-40 bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-1 text-xs text-left">
+                    <button @click.stop="duplicateTemplate(t)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Duplicate</button>
+                    <button @click.stop="exportTemplate(t)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Export</button>
+                    <button @click.stop="openLog(t); openMenuId = null" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Log</button>
+                    <div class="border-t border-slate-100 my-1"></div>
+                    <button v-if="!t.archived_at" @click.stop="archiveTemplate(t)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Archive</button>
+                    <button v-else @click.stop="unarchiveTemplate(t)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Unarchive</button>
+                    <button @click.stop="remove(t); openMenuId = null" class="w-full text-left px-3 py-1.5 hover:bg-rose-50 text-rose-600">Delete</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- Deleted templates -->

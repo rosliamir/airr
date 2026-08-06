@@ -35,7 +35,10 @@ class ReportRenderer
             : match ($type) {
                 'grouped' => $this->grouped($def, $columns, $rows),
                 'kpi'     => $this->kpi($def, $rows),
-                'chart'   => $this->chart($def, $rows),
+                // A chart on its own hides the underlying rows — show the data
+                // table underneath too, so "generate a graph" doesn't remove
+                // the ability to see/verify the actual numbers.
+                'chart'   => $this->chart($def, $columns, $rows) . '<div class="mt-4">' . $this->table($columns, $rows, $def) . '</div>',
                 default   => $this->table($columns, $rows, $def),
             };
         // An AI-written narrative (grounded in the actual fetched rows —
@@ -133,12 +136,15 @@ class ReportRenderer
                 'calc'      => $c['calc'] ?? null,
                 'align'     => $c['align'] ?? null,
                 'hidden'    => $c['hidden'] ?? false,
+                // Numeric/range classifier — see bucketValue() below.
+                'bucket'    => $c['bucket'] ?? null,
+                'source'    => $c['source'] ?? null,
             ], $def['columns']);
 
             return array_values(array_filter($cols, fn ($c) => ! $c['hidden']));
         }
 
-        return array_map(fn ($f) => ['field' => $f, 'label' => $this->humanize($f), 'format' => 'text', 'value_map' => null, 'calc' => null, 'align' => null, 'hidden' => false], $datasetColumns);
+        return array_map(fn ($f) => ['field' => $f, 'label' => $this->humanize($f), 'format' => 'text', 'value_map' => null, 'calc' => null, 'align' => null, 'hidden' => false, 'bucket' => null, 'source' => null], $datasetColumns);
     }
 
     private function alignClass(array $c): string
@@ -156,6 +162,13 @@ class ReportRenderer
     // value IS the display text, not something to further number/date-format.
     private function cellValue(array $c, array $row): string
     {
+        // Bucket columns classify a numeric source field into a labeled band
+        // (e.g. "RM1,000 and above" vs "Below RM1,000") — the label IS the
+        // display value, so it skips calc/value_map/format entirely.
+        if (! empty($c['bucket'])) {
+            return $this->bucketValue($c, $row) ?? '—';
+        }
+
         $raw = $c['calc'] ? $this->evalExpr((string) $c['calc'], $row) : ($row[$c['field']] ?? null);
         // Fixed-width DB columns (Oracle CHAR, etc.) commonly return
         // trailing-space-padded strings ("K         ") — trim before display
@@ -282,10 +295,17 @@ class ReportRenderer
         }
         $aggregates = $def['aggregates'] ?? [];
 
+        // If groups.field names a bucket column (a numeric-range classifier,
+        // not a real dataset field), partition by its computed band label
+        // instead of the nonexistent raw row[groupField].
+        $bucketCol = collect($columns)->firstWhere('field', $groupField);
+        $bucketCol = ! empty($bucketCol['bucket'] ?? null) ? $bucketCol : null;
+
         // Partition rows by group value (stable order of first appearance).
         $groups = [];
         foreach ($rows as $row) {
-            $groups[(string) ($row[$groupField] ?? '—')][] = $row;
+            $value = $bucketCol ? ($this->bucketValue($bucketCol, $row) ?? '—') : (string) ($row[$groupField] ?? '—');
+            $groups[$value][] = $row;
         }
 
         $out = '';
@@ -313,7 +333,7 @@ class ReportRenderer
     // of groups[0].field, plotted against aggregates[0] (fn/field). Pure
     // inline SVG (no JS/canvas) so it stays print-stable and reproducible,
     // same as the rest of the renderer.
-    private function chart(array $def, array $rows): string
+    private function chart(array $def, array $columns, array $rows): string
     {
         $groupField = $def['groups'][0]['field'] ?? null;
         if (! $groupField) {
@@ -321,9 +341,14 @@ class ReportRenderer
         }
         $agg = $def['aggregates'][0] ?? ['field' => '*', 'fn' => 'count', 'label' => 'Count'];
 
+        // Same bucket-column support as grouped() — see there for details.
+        $bucketCol = collect($columns)->firstWhere('field', $groupField);
+        $bucketCol = ! empty($bucketCol['bucket'] ?? null) ? $bucketCol : null;
+
         $buckets = [];
         foreach ($rows as $row) {
-            $buckets[(string) ($row[$groupField] ?? '—')][] = $row;
+            $value = $bucketCol ? ($this->bucketValue($bucketCol, $row) ?? '—') : (string) ($row[$groupField] ?? '—');
+            $buckets[$value][] = $row;
         }
         $points = [];
         foreach ($buckets as $label => $groupRows) {
@@ -351,29 +376,45 @@ class ReportRenderer
     private function xyChartSvg(array $points, bool $line): string
     {
         $w = self::CHART_W;
-        $h = self::CHART_H;
         $pad = self::CHART_PAD;
-        $max = max(array_column($points, 'value')) ?: 1;
         $n = count($points);
+        // Many categories crammed into a fixed width means horizontal labels
+        // overlap into an unreadable smear — rotate them and reserve extra
+        // vertical room once there are more than a handful of points, and
+        // thin out which labels are drawn at all if it's still too tight.
+        $rotate = $n > 8;
+        $bottomMargin = $rotate ? 70 : 40;
+        $plotH = self::CHART_H - self::CHART_PAD; // fixed plot-area height regardless of label space
+        $h = $plotH + $bottomMargin;
+        $baseline = $plotH;
+        $labelEvery = $n > 20 ? (int) ceil($n / 20) : 1;
+
+        $max = max(array_column($points, 'value')) ?: 1;
         $slot = ($w - 2 * $pad) / max(1, $n);
 
         $marks = '';
         $labels = '';
         $coords = [];
         foreach ($points as $i => $p) {
-            $barH = ($p['value'] / $max) * ($h - 2 * $pad);
+            $barH = ($p['value'] / $max) * ($baseline - $pad);
             $x = $pad + $i * $slot;
             $cx = $x + $slot / 2;
-            $cy = $h - $pad - $barH;
+            $cy = $baseline - $barH;
             $coords[] = [$cx, $cy];
             if (! $line) {
-                $barW = max(8, $slot * 0.6);
+                $barW = max(6, $slot * 0.6);
                 $marks .= '<rect x="' . ($cx - $barW / 2) . '" y="' . $cy . '" width="' . $barW . '" height="' . $barH
                     . '" rx="3" fill="#E11D48" />';
             }
-            $labels .= '<text x="' . $cx . '" y="' . ($h - $pad + 16) . '" font-size="11" fill="#64748b" text-anchor="middle">'
-                . e(mb_strimwidth((string) $p['label'], 0, 12, '…')) . '</text>';
-            $marks .= '<text x="' . $cx . '" y="' . ($cy - 6) . '" font-size="10" fill="#334155" text-anchor="middle">' . e($this->fmt($p['value'], 'number')) . '</text>';
+            if ($i % $labelEvery === 0) {
+                $labelText = e(mb_strimwidth((string) $p['label'], 0, 12, '…'));
+                $labels .= $rotate
+                    ? '<text x="' . $cx . '" y="' . ($baseline + 14) . '" font-size="10" fill="#64748b" text-anchor="end" transform="rotate(-45 ' . $cx . ' ' . ($baseline + 14) . ')">' . $labelText . '</text>'
+                    : '<text x="' . $cx . '" y="' . ($baseline + 16) . '" font-size="11" fill="#64748b" text-anchor="middle">' . $labelText . '</text>';
+            }
+            if ($n <= 15) {
+                $marks .= '<text x="' . $cx . '" y="' . ($cy - 6) . '" font-size="10" fill="#334155" text-anchor="middle">' . e($this->fmt($p['value'], 'number')) . '</text>';
+            }
         }
         if ($line) {
             $poly = implode(' ', array_map(fn ($c) => $c[0] . ',' . $c[1], $coords));
@@ -383,8 +424,8 @@ class ReportRenderer
             }
         }
 
-        return '<svg viewBox="0 0 ' . $w . ' ' . $h . '" class="w-full max-w-2xl" style="max-height:360px">'
-            . '<line x1="' . $pad . '" y1="' . ($h - $pad) . '" x2="' . ($w - $pad / 2) . '" y2="' . ($h - $pad) . '" stroke="#e2e8f0" />'
+        return '<svg viewBox="0 0 ' . $w . ' ' . $h . '" class="w-full max-w-2xl" style="max-height:400px">'
+            . '<line x1="' . $pad . '" y1="' . $baseline . '" x2="' . ($w - $pad / 2) . '" y2="' . $baseline . '" stroke="#e2e8f0" />'
             . $marks . $labels . '</svg>';
     }
 
@@ -519,6 +560,25 @@ class ReportRenderer
         }
 
         return $bgClass;
+    }
+
+    // Classifies row[c.source ?? c.field] against c.bucket rules (same
+    // {op, value, label} shape as "conditional", evaluated top-to-bottom,
+    // FIRST match wins — write narrower/higher ranges before broader ones).
+    // Lets a report group/color by a value RANGE (e.g. "amount >= 1000")
+    // instead of only exact field values, by giving groups.field a synthetic
+    // column whose bucket rules produce the band label.
+    private function bucketValue(array $c, array $row): ?string
+    {
+        $sourceField = $c['source'] ?? $c['field'];
+        $actual = $row[$sourceField] ?? null;
+        foreach ($c['bucket'] as $rule) {
+            if ($this->matches($actual, $rule['op'] ?? '=', $rule['value'] ?? null)) {
+                return (string) ($rule['label'] ?? '');
+            }
+        }
+
+        return null;
     }
 
     private function matches($actual, string $op, $expected): bool

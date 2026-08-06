@@ -29,6 +29,7 @@ export const adminMenu: MenuGroup[] = [
     items: [
       { label: 'Reports', route: 'reports', icon: 'FileText', module: 'M6', permission: 'reports.view', phase: 1, ready: true },
       { label: 'Templates', route: 'templates', icon: 'LayoutTemplate', module: 'M6', permission: 'reports.create', phase: 1, ready: true },
+      { label: 'Dashboards', route: 'dashboards', icon: 'LayoutGrid', module: 'M-DASH', permission: 'dashboards.view', phase: 6, ready: true },
     ],
   },
   {

@@ -18,7 +18,7 @@ abstract class TestCase extends BaseTestCase
      */
     protected function actingWithPermissions(array $permissions = []): User
     {
-        $user = User::factory()->create(['user_type' => User::TYPE_USER]);
+        $user = User::factory()->create(['user_type' => User::TYPE_USER_LEVEL_1]);
 
         if ($permissions) {
             $role = Role::create(['slug' => 'test-role', 'name' => 'Test Role', 'clearance' => 1]);

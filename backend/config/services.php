@@ -41,4 +41,8 @@ return [
         'redirect' => env('GOOGLE_REDIRECT_URI'),
     ],
 
+    'kerisi_sso' => [
+        'secret' => env('KERISI_SSO_SECRET'),
+    ],
+
 ];

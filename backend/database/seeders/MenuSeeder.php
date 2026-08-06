@@ -18,6 +18,7 @@ class MenuSeeder extends Seeder
             ['Author', null, null, null, null, null, [
                 ['Reports', 'reports', 'FileText', 'M6', 'reports.view', null],
                 ['Templates', 'templates', 'LayoutTemplate', 'M6', 'reports.create', null],
+                ['Dashboards', 'dashboards', 'LayoutGrid', 'M-DASH', 'dashboards.view', null],
             ]],
             ['Data & Intelligence', null, null, null, null, null, [
                 ['Data Sources', 'datasources', 'Database', 'M2', 'datasources.view', null],

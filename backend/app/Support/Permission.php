@@ -39,6 +39,21 @@ class Permission
     // Menu administration (M14 — DB-driven navigation)
     const MENUS_MANAGE = 'menus.manage';
 
+    // Dashboards (widget-based authoring)
+    const DASHBOARDS_VIEW   = 'dashboards.view';
+    const DASHBOARDS_CREATE = 'dashboards.create';
+    const DASHBOARDS_EDIT   = 'dashboards.edit';
+    const DASHBOARDS_DELETE = 'dashboards.delete';
+    const DASHBOARDS_RUN    = 'dashboards.run';
+
+    // Tasks (dashboard widget data source)
+    const TASKS_VIEW   = 'tasks.view';
+    const TASKS_MANAGE = 'tasks.manage';
+
+    // Announcements (dashboard widget data source)
+    const ANNOUNCEMENTS_VIEW   = 'announcements.view';
+    const ANNOUNCEMENTS_MANAGE = 'announcements.manage';
+
     public static function all(): array
     {
         return [
@@ -50,6 +65,9 @@ class Permission
             self::USERS_MANAGE, self::ROLES_MANAGE, self::AUDIT_READ, self::SETTINGS_MANAGE,
             self::PROJECTS_VIEW, self::PROJECTS_MANAGE,
             self::MENUS_MANAGE,
+            self::DASHBOARDS_VIEW, self::DASHBOARDS_CREATE, self::DASHBOARDS_EDIT, self::DASHBOARDS_DELETE, self::DASHBOARDS_RUN,
+            self::TASKS_VIEW, self::TASKS_MANAGE,
+            self::ANNOUNCEMENTS_VIEW, self::ANNOUNCEMENTS_MANAGE,
         ];
     }
 }

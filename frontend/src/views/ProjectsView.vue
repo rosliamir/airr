@@ -4,6 +4,8 @@ import AdminLayout from '../layouts/AdminLayout.vue'
 import ConstantsPanel from '../components/ConstantsPanel.vue'
 import { apiRequest, uploadFile, downloadFile, ApiException } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useListViewMode } from '../composables/useListViewMode'
+import ViewModeToggle from '../components/ViewModeToggle.vue'
 
 type Member = { id: number; name: string; email?: string }
 type Project = {
@@ -71,6 +73,7 @@ const sortedProjects = computed(() => {
   })
 })
 
+const { viewMode } = useListViewMode('projects')
 const selectedIds = ref<Set<number>>(new Set())
 const allSelected = computed(() => sortedProjects.value.length > 0 && sortedProjects.value.every(p => selectedIds.value.has(p.id)))
 function toggleSelectAll() {
@@ -426,17 +429,20 @@ onMounted(() => {
             <option value="status">Status</option>
           </select>
         </div>
-        <div v-if="selectedIds.size" class="flex items-center gap-2">
-          <span class="text-xs text-slate-400">{{ selectedIds.size }} selected</span>
-          <button @click="bulkExport" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Export</button>
-          <button @click="bulkArchive" :disabled="busy" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Archive</button>
-          <button @click="bulkDelete" :disabled="busy" class="text-xs font-medium text-rose-600 border border-rose-200 hover:bg-rose-50 rounded-lg px-2.5 py-1.5">Delete</button>
+        <div class="flex items-center gap-2">
+          <div v-if="selectedIds.size" class="flex items-center gap-2">
+            <span class="text-xs text-slate-400">{{ selectedIds.size }} selected</span>
+            <button @click="bulkExport" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Export</button>
+            <button @click="bulkArchive" :disabled="busy" class="text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">Archive</button>
+            <button @click="bulkDelete" :disabled="busy" class="text-xs font-medium text-rose-600 border border-rose-200 hover:bg-rose-50 rounded-lg px-2.5 py-1.5">Delete</button>
+          </div>
+          <ViewModeToggle v-model="viewMode" />
         </div>
       </div>
 
-      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <div v-if="loading" class="text-slate-400 text-sm">Loading…</div>
-        <div v-else-if="!sortedProjects.length" class="text-slate-400 text-sm">No projects match.</div>
+      <div v-if="loading" class="text-slate-400 text-sm">Loading…</div>
+      <div v-else-if="!sortedProjects.length" class="text-slate-400 text-sm">No projects match.</div>
+      <div v-else-if="viewMode === 'card'" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <div v-for="p in sortedProjects" :key="p.id" class="relative bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-2 hover:border-slate-200 transition"
           :class="p.archived_at ? 'opacity-50' : ''"
           :style="{ borderLeft: `4px solid ${colorOf(p)}` }">
@@ -481,6 +487,75 @@ onMounted(() => {
           </div>
           <div class="text-xs text-slate-500 mt-auto cursor-pointer" @click="openEdit(p)">{{ p.users_count }} users · {{ p.reports_count }} reports · {{ p.templates_count }} templates</div>
         </div>
+      </div>
+
+      <!-- Tabular listing — same fields/actions as the cards above, one row per project -->
+      <div v-else class="overflow-x-auto border border-slate-100 rounded-xl">
+        <table class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="bg-slate-50 text-left text-xs text-slate-500">
+              <th class="px-3 py-2 border-b border-slate-200 w-8">
+                <input type="checkbox" :checked="allSelected" @change="toggleSelectAll" class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" />
+              </th>
+              <th class="px-3 py-2 border-b border-slate-200">Name</th>
+              <th class="px-3 py-2 border-b border-slate-200">Customer</th>
+              <th class="px-3 py-2 border-b border-slate-200">Type</th>
+              <th class="px-3 py-2 border-b border-slate-200">Dates</th>
+              <th class="px-3 py-2 border-b border-slate-200">Status</th>
+              <th class="px-3 py-2 border-b border-slate-200">Tags</th>
+              <th class="px-3 py-2 border-b border-slate-200">Counts</th>
+              <th class="px-3 py-2 border-b border-slate-200 w-8"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in sortedProjects" :key="p.id" class="hover:bg-slate-50 transition"
+              :class="p.archived_at ? 'opacity-50' : ''">
+              <td class="px-3 py-2 border-b border-slate-100" @click.stop>
+                <input type="checkbox" :checked="selectedIds.has(p.id)" @change="toggleSelect(p.id)"
+                  class="rounded border-slate-300 text-airr-500 focus:ring-airr-300" />
+              </td>
+              <td class="px-3 py-2 border-b border-slate-100 cursor-pointer" @click="openEdit(p)">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="w-7 h-7 rounded-lg shrink-0 inline-flex items-center justify-center text-white text-[10px] font-bold"
+                    :style="{ background: colorOf(p) }">{{ initialsOf(p.name) }}</span>
+                  <div class="min-w-0">
+                    <div class="font-semibold text-slate-700 truncate">{{ p.name }}</div>
+                    <div class="text-xs text-slate-400 font-mono">{{ p.code }}</div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 cursor-pointer" @click="openEdit(p)">{{ p.customer_name ?? '—' }}</td>
+              <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 capitalize cursor-pointer" @click="openEdit(p)">{{ p.type ?? '—' }}</td>
+              <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-400 cursor-pointer" @click="openEdit(p)">{{ p.start_date ?? '—' }} → {{ p.end_date ?? '—' }}</td>
+              <td class="px-3 py-2 border-b border-slate-100">
+                <span v-if="p.archived_at" class="text-[10px] rounded-full px-1.5 py-0.5 bg-slate-200 text-slate-500 mr-1">archived</span>
+                <span class="text-xs font-medium rounded-full px-2 py-0.5" :class="statusBadge[p.status]">{{ statusLabel[p.status] }}</span>
+              </td>
+              <td class="px-3 py-2 border-b border-slate-100">
+                <div class="flex flex-wrap gap-1">
+                  <span v-for="tag in p.tags ?? []" :key="tag" class="text-[10px] bg-airr-50 text-airr-600 rounded-full px-2 py-0.5">#{{ tag }}</span>
+                </div>
+              </td>
+              <td class="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 cursor-pointer" @click="openEdit(p)">{{ p.users_count }}u · {{ p.reports_count }}r · {{ p.templates_count }}t</td>
+              <td class="px-3 py-2 border-b border-slate-100 text-right">
+                <div v-if="canManage" class="relative inline-block">
+                  <button @click.stop="toggleMenu(p.id)" class="text-slate-400 hover:text-slate-600 px-1 rounded hover:bg-slate-100">⋮</button>
+                  <div v-if="openMenuId === p.id"
+                    class="absolute right-0 top-full mt-1 w-40 bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-1 text-xs text-left">
+                    <button @click.stop="duplicateProject(p)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Duplicate</button>
+                    <button @click.stop="exportProject(p)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Export</button>
+                    <button @click.stop="openLog(p)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Log</button>
+                    <button @click.stop="toggleActive(p)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">{{ p.status === 'active' ? 'Set Inactive' : 'Set Active' }}</button>
+                    <div class="border-t border-slate-100 my-1"></div>
+                    <button v-if="!p.archived_at" @click.stop="archiveProject(p)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Archive</button>
+                    <button v-else @click.stop="unarchiveProject(p)" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-600">Unarchive</button>
+                    <button @click.stop="remove(p); openMenuId = null" class="w-full text-left px-3 py-1.5 hover:bg-rose-50 text-rose-600">Delete</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- Deleted projects -->
